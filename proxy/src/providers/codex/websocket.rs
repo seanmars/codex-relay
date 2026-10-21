@@ -4266,7 +4266,7 @@ mod tests {
 
         let error = match collect_ws_events_with_keepalive_interval(
             &mut client,
-            50,
+            200,
             None,
             None,
             None,

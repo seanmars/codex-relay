@@ -78,14 +78,20 @@ function resetIn(w: UsageWindow, nowSec: number): string {
   return h >= 24 ? `${Math.floor(h / 24)}d${h % 24}h` : h > 0 ? `${h}h${m}m` : `${m}m`
 }
 
-// One line under the prompt: where this window goes and, on Codex, what it has used
-export function statusText(h: Health | null): string {
+export const RELAY_ICON = '⇄'
+
+// One line under the prompt: where this window goes and, on Codex, how full its context is and what the plan has used
+export function statusText(h: Health | null, contextPercent?: number): string {
+  return `${RELAY_ICON} ${statusBody(h, contextPercent)}`
+}
+
+function statusBody(h: Health | null, contextPercent?: number): string {
   if (!h) return 'codex-relay 離線: 直連 Claude'
   if (h.session.route === 'claude') return h.defaultRoute === 'codex' ? 'Claude (此視窗) · 新 session 預設 Codex' : 'Claude'
   if (h.proxy.error && !h.proxy.up) return `Codex: proxy 無法啟動 (${h.proxy.error.slice(0, 60)})`
   const c = h.session.codex
   const parts = [`Codex ${answeringModel(c?.model ?? null)}`.trim()]
-  if (c) parts.push(`${fmtTokens(c.inputTokens)} in / ${fmtTokens(c.outputTokens)} out`)
+  if (contextPercent !== undefined) parts.push(`ctx ${Math.round(contextPercent)}%`)
   if (h.usage) {
     const windows = usageWindows(h.usage).map((w) => `${windowLabel(w)} ${pct(w)}`)
     if (windows.length) parts.push(windows.join(' · '))
