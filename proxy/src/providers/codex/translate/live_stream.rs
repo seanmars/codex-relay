@@ -732,12 +732,14 @@ impl LiveStreamTranslator {
                 ..
             } => {
                 self.semantic_output_started = true;
+                // Same rule as the buffered reducer: arguments built from
+                // deltas stay; otherwise the done item's arguments win
                 if let Some(final_args) = payload
                     .get("item")
                     .and_then(|item| item.get("arguments"))
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
-                    && (args_accum.is_empty() || (!*had_delta && !*emitted_args))
+                    && !*had_delta
                 {
                     *args_accum = final_args.to_string();
                 }

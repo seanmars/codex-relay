@@ -757,18 +757,15 @@ pub(crate) fn reduce_upstream_bytes_with_policy(
                     ..
                 } = &mut state
             {
+                // Same rule as the live translator: arguments built from
+                // deltas stay; otherwise the done item's arguments win
                 if let Some(final_args) = item_val
                     .get("arguments")
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
+                    && !*had_delta
                 {
-                    if !args_accum.is_empty() && !*emitted_args {
-                        // Already have accum from deltas - skip
-                    } else if *had_delta {
-                        // Already emitted deltas
-                    } else {
-                        *args_accum = final_args.to_string();
-                    }
+                    *args_accum = final_args.to_string();
                 }
 
                 if !args_accum.is_empty() {

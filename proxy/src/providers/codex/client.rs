@@ -725,6 +725,12 @@ impl CodexHttpClient {
         }
     }
 
+    /// The one rule for an Auto-transport WebSocket failure: streaming and
+    /// non-streaming requests both fall back to HTTP only through here.
+    fn may_fallback_to_http(&self, err: &CodexError) -> bool {
+        self.auto_http_fallback_enabled && should_fallback_to_http(err)
+    }
+
     pub fn new_with_client(
         client: reqwest::Client,
         auth_manager: CodexAuthManager<DefaultCodexAuthStore>,
@@ -1285,7 +1291,7 @@ impl CodexHttpClient {
             .stream_codex_websocket_events_for_owner(body, ctx, continuation)
             .await?;
         match websocket.recv().await {
-            Some(Err(err)) if should_fallback_to_http(&err) => {
+            Some(Err(err)) if self.may_fallback_to_http(&err) => {
                 self.stream_codex_http_events_for_owner(body, ctx).await
             }
             Some(item) => {
@@ -1736,9 +1742,7 @@ impl CodexHttpClient {
                             // replacement transport or connection.
                             Err(err)
                         }
-                        Err(err)
-                            if self.auto_http_fallback_enabled && should_fallback_to_http(&err) =>
-                        {
+                        Err(err) if self.may_fallback_to_http(&err) => {
                             // Fall back to HTTP only if WebSocket failed before sending
                             let body_json =
                                 serde_json::to_string(body).map_err(|e| CodexError {
