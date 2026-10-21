@@ -132,9 +132,20 @@ fn parse_alias(raw: &str) -> Option<AliasProvider> {
     }
 }
 
-fn read_file_config(config_dir: &Path) -> Option<FileConfig> {
+/// The `config.json` the settings come from: the config dir's own, else the
+/// one left in the dir used before the platform fix (`paths::pre_fix_config_file`).
+fn config_file_to_read(config_dir: &Path) -> PathBuf {
     let path = config_dir.join("config.json");
-    let raw = fs::read_to_string(path).ok()?;
+    if path.exists() {
+        return path;
+    }
+    paths::pre_fix_config_file(config_dir, &paths::DirResolverEnv::default())
+        .filter(|old| old.exists())
+        .unwrap_or(path)
+}
+
+fn read_file_config(config_dir: &Path) -> Option<FileConfig> {
+    let raw = fs::read_to_string(config_file_to_read(config_dir)).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
@@ -985,14 +996,21 @@ pub fn codex_auth_source() -> CodexAuthSource {
 }
 
 /// Writes `codex.authSource` into `config.json` and keeps every other key.
-/// A `config.json` that is not a JSON object is refused, not replaced.
+/// A `config.json` that is not a JSON object is refused, not replaced. The
+/// keys of a `config.json` still in the pre-fix dir move along to the config dir.
 pub fn save_codex_auth_source(source: CodexAuthSource) -> anyhow::Result<PathBuf> {
     let path = config_path();
-    let mut root = match fs::read_to_string(&path) {
+    let source_path = config_file_to_read(&paths::config_dir());
+    let mut root = match fs::read_to_string(&source_path) {
         Ok(raw) => serde_json::from_str::<serde_json::Value>(&raw)
-            .map_err(|err| anyhow::anyhow!("{} is not valid JSON: {err}", path.display()))?,
+            .map_err(|err| anyhow::anyhow!("{} is not valid JSON: {err}", source_path.display()))?,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
-        Err(err) => return Err(anyhow::anyhow!("Failed to read {}: {err}", path.display())),
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "Failed to read {}: {err}",
+                source_path.display()
+            ));
+        }
     };
     let codex = root
         .as_object_mut()
@@ -1115,6 +1133,43 @@ mod tests {
             "CCP_CONFIG_DIR".to_string(),
             config.path().to_string_lossy().into_owned(),
         )])
+    }
+
+    // Before the platform fix Windows kept config.json under ~/.config; it is
+    // still read from there, and the next save moves its keys to %APPDATA%
+    #[cfg(windows)]
+    #[test]
+    fn windows_reads_and_moves_a_config_left_in_the_pre_fix_dir() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let config = tempfile::TempDir::new().unwrap();
+        let root = tempfile::TempDir::new().unwrap();
+        // Locals drop in reverse: these come back before isolated_env's own
+        let _env = isolated_env(&config);
+        let _no_dir = EnvGuard::unset("CCP_CONFIG_DIR");
+        let _no_xdg = EnvGuard::unset("XDG_CONFIG_HOME");
+        let _home = EnvGuard::set("HOME", root.path());
+        let _appdata = EnvGuard::set("APPDATA", root.path().join("AppData"));
+        let old_dir = root.path().join(".config").join("claude-code-proxy");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::write(old_dir.join("config.json"), r#"{"port":19001}"#).unwrap();
+
+        assert_eq!(port(), 19001);
+        let saved = save_codex_auth_source(CodexAuthSource::Proxy).unwrap();
+        assert_eq!(
+            saved,
+            root.path()
+                .join("AppData")
+                .join("claude-code-proxy")
+                .join("config.json")
+        );
+        let moved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&saved).unwrap()).unwrap();
+        assert_eq!(moved["port"], 19001);
+        assert_eq!(moved["codex"]["authSource"], "proxy");
+
+        // From now on the config dir's own file is the one read
+        std::fs::write(old_dir.join("config.json"), r#"{"port":19002}"#).unwrap();
+        assert_eq!(port(), 19001);
     }
 
     #[test]

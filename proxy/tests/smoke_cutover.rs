@@ -1820,6 +1820,8 @@ async fn smoke_codex_http_traffic_capture_writes_upstream_artifacts() {
 
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
+    // Windows keeps state under %LOCALAPPDATA%, other platforms under XDG_STATE_HOME
+    let _local_state_env = EnvGuard::set("LOCALAPPDATA", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
@@ -1869,6 +1871,8 @@ async fn smoke_codex_http_stream_traffic_captures_downstream_events() {
 
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
+    // Windows keeps state under %LOCALAPPDATA%, other platforms under XDG_STATE_HOME
+    let _local_state_env = EnvGuard::set("LOCALAPPDATA", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
@@ -2598,6 +2602,8 @@ async fn smoke_codex_http_truncated_upstream_writes_reducer_diagnostic() {
 
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
+    // Windows keeps state under %LOCALAPPDATA%, other platforms under XDG_STATE_HOME
+    let _local_state_env = EnvGuard::set("LOCALAPPDATA", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
@@ -3118,6 +3124,8 @@ async fn smoke_codex_websocket_stream_retries_terminal_only_completion_with_full
 
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
+    // Windows keeps state under %LOCALAPPDATA%, other platforms under XDG_STATE_HOME
+    let _local_state_env = EnvGuard::set("LOCALAPPDATA", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
@@ -3351,6 +3359,8 @@ async fn smoke_codex_websocket_traffic_capture_writes_upstream_artifacts() {
 
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
+    // Windows keeps state under %LOCALAPPDATA%, other platforms under XDG_STATE_HOME
+    let _local_state_env = EnvGuard::set("LOCALAPPDATA", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);

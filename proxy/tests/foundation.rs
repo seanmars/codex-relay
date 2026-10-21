@@ -55,7 +55,7 @@ fn path_resolvers_cover_platform_rules() {
     let mut env = HashMap::new();
     env.insert("CCP_CONFIG_DIR".to_string(), "/tmp/ccp-config".to_string());
     let deps = DirResolverEnv {
-        platform: "darwin".to_string(),
+        platform: "macos".to_string(),
         home: "/home/u".into(),
         env: env.clone(),
     };
@@ -65,7 +65,7 @@ fn path_resolvers_cover_platform_rules() {
     );
 
     let deps = DirResolverEnv {
-        platform: "darwin".to_string(),
+        platform: "macos".to_string(),
         home: "/home/u".into(),
         env: HashMap::from([("XDG_CONFIG_HOME".into(), "/x".into())]),
     };
@@ -85,13 +85,20 @@ fn path_resolvers_cover_platform_rules() {
     );
 
     let deps = DirResolverEnv {
-        platform: "win32".to_string(),
-        home: "C:/Users/u".into(),
-        env: HashMap::from([("APPDATA".into(), "C:/Users/u/AppData/Roaming".into())]),
+        platform: "windows".to_string(),
+        home: r"C:\Users\u".into(),
+        env: HashMap::from([
+            ("APPDATA".into(), r"C:\Users\u\AppData\Roaming".into()),
+            ("LOCALAPPDATA".into(), r"C:\Users\u\AppData\Local".into()),
+        ]),
     };
     assert_eq!(
         paths::resolve_config_dir(&deps).to_string_lossy(),
-        "C:/Users/u/AppData/Roaming/claude-code-proxy"
+        r"C:\Users\u\AppData\Roaming\claude-code-proxy"
+    );
+    assert_eq!(
+        paths::resolve_state_dir(&deps).to_string_lossy(),
+        r"C:\Users\u\AppData\Local\claude-code-proxy"
     );
 }
 
