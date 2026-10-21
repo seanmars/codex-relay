@@ -622,8 +622,13 @@ fn apply_model_lane_for_request(model: &mut String, body: &MessagesRequest) -> b
     uses_responses_lite(model)
 }
 
+// Count only lines that start with `event:`: the text can also appear inside
+// a JSON `data:` line, for example in tool output
 fn count_sse_events(bytes: &[u8]) -> u64 {
-    String::from_utf8_lossy(bytes).matches("event:").count() as u64
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .filter(|line| line.starts_with("event:"))
+        .count() as u64
 }
 
 fn log_compaction_event(
@@ -1806,6 +1811,12 @@ mod tests {
     use tokio_tungstenite::tungstenite::Message;
 
     use super::*;
+
+    #[test]
+    fn count_sse_events_ignores_event_text_inside_data() {
+        let sse = b"event: content_block_delta\ndata: {\"text\":\"event: x\"}\n\n";
+        assert_eq!(count_sse_events(sse), 1);
+    }
 
     fn live_test_request(text: &str) -> translate::request::ResponsesRequest {
         translate::request::ResponsesRequest {
