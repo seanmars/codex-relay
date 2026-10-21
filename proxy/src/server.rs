@@ -17,9 +17,7 @@ use crate::{
             MAX_GENERATION_REQUEST_BYTES, MultipartEditInput, UploadedImage, image_error_response,
             prepare_json_request, prepare_multipart_edit,
         },
-        native::{
-            CodexNativeBackend, NativeResponseOutcome, openai_error, validate_native_request_model,
-        },
+        native::{CodexNativeBackend, NativeResponseOutcome, openai_error, shape_native_request},
         transcription::{
             CodexTranscriptionBackend, MAX_TRANSCRIPTION_REQUEST_BYTES, PreparedTranscription,
             TranscriptionRequestError, prepare_transcription, transcription_error_response,
@@ -964,8 +962,21 @@ async fn handler_responses(State(state): State<Arc<AppState>>, req: Request<Body
         );
         return monitor_response_body(response, request_guard);
     };
-    let parsed = if provider.name() == "codex" {
-        if let Err(response) = validate_native_request_model(&body) {
+    let native_or_parsed = if provider.name() == "codex" {
+        shape_native_request(body.clone()).map(|native| (Some(native), None))
+    } else {
+        parse_request(
+            OpenAiSurface::Responses,
+            body.clone(),
+            provider.name(),
+            session_id.as_deref(),
+        )
+        .map(|parsed| (None, Some(parsed)))
+        .map_err(|error| error.response())
+    };
+    let (native, parsed) = match native_or_parsed {
+        Ok(pair) => pair,
+        Err(response) => {
             log_routed_openai_request_completed(
                 &log,
                 &req_id,
@@ -976,29 +987,6 @@ async fn handler_responses(State(state): State<Arc<AppState>>, req: Request<Body
                 started_at,
             );
             return monitor_response_body(response, request_guard);
-        }
-        None
-    } else {
-        match parse_request(
-            OpenAiSurface::Responses,
-            body.clone(),
-            provider.name(),
-            session_id.as_deref(),
-        ) {
-            Ok(parsed) => Some(parsed),
-            Err(error) => {
-                let response = error.response();
-                log_routed_openai_request_completed(
-                    &log,
-                    &req_id,
-                    "responses",
-                    provider.name(),
-                    Some(&normalized_model),
-                    response.status(),
-                    started_at,
-                );
-                return monitor_response_body(response, request_guard);
-            }
         }
     };
     if provider.name() != "codex"
@@ -1013,23 +1001,26 @@ async fn handler_responses(State(state): State<Arc<AppState>>, req: Request<Body
         &normalized_model,
         now,
     );
-    let effort = parsed
-        .as_ref()
-        .and_then(|parsed| {
-            parsed
-                .messages
-                .extra
-                .get("output_config")
-                .and_then(|value| value.get("effort"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| body.pointer("/reasoning/effort").and_then(Value::as_str))
-        .map(str::to_string);
+    let effort = match native.as_ref() {
+        Some(native) => native.effort.clone(),
+        None => parsed
+            .as_ref()
+            .and_then(|parsed| {
+                parsed
+                    .messages
+                    .extra
+                    .get("output_config")
+                    .and_then(|value| value.get("effort"))
+                    .and_then(Value::as_str)
+            })
+            .or_else(|| body.pointer("/reasoning/effort").and_then(Value::as_str))
+            .map(str::to_string),
+    };
     if let Some(monitor) = state.monitor.as_ref() {
         if let Some(current) = current.as_ref() {
             monitor.session_sequence_resolved(&req_id, current.seq);
         }
-        monitor.provider_selected(&req_id, provider.name(), &normalized_model, effort);
+        monitor.provider_selected(&req_id, provider.name(), &normalized_model, effort.clone());
     }
     let traffic = create_traffic_capture(TrafficCaptureOptions {
         req_id: req_id.clone(),
@@ -1053,6 +1044,7 @@ async fn handler_responses(State(state): State<Arc<AppState>>, req: Request<Body
                 "provider": provider.name(),
                 "model": &normalized_model,
                 "requestedModel": &requested_model,
+                "effort": &effort,
                 "method": method.as_str(),
                 "path": &path,
                 "query": &query,
@@ -1104,8 +1096,9 @@ async fn handler_responses(State(state): State<Arc<AppState>>, req: Request<Body
             Err(error) => OpenAiError::from(error).response(),
         }
     } else {
+        let native = native.expect("a request that is not parsed is shaped for codex");
         match state.native_responses.as_ref() {
-            Some(backend) => backend.handle(body, context).await,
+            Some(backend) => backend.handle(native, context).await,
             None => openai_error(
                 StatusCode::NOT_FOUND,
                 "not_found_error",

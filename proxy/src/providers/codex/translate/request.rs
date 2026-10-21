@@ -455,8 +455,18 @@ pub(crate) fn resolve_request_effort(
     let Some(config) = codex_config else {
         return Ok(effort);
     };
+    resolve_codex_effort(effort, config, is_compact_messages_request(req))
+}
+
+/// The Codex config applied to a request's effort, the same way on every
+/// endpoint: the effort override wins, and a compaction request takes the cap.
+pub(crate) fn resolve_codex_effort(
+    effort: Option<Effort>,
+    config: &CodexOverrides,
+    compact: bool,
+) -> Result<Option<Effort>, anyhow::Error> {
     let effort = resolve_effort_override(effort, config.effort.as_deref())?;
-    if is_compact_messages_request(req) {
+    if compact {
         let cap = compact_effort_cap_from(config.compact_effort.as_deref());
         return Ok(apply_compact_effort_cap(effort, cap));
     }

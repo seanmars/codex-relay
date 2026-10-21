@@ -11,6 +11,7 @@ use http::{HeaderMap, HeaderName, StatusCode};
 use serde_json::{Map, Value, json};
 
 use crate::anthropic::sse::parse_sse_events;
+use crate::config;
 use crate::provider::RequestContext;
 use crate::registry::normalize_incoming_model;
 use crate::traffic::{
@@ -20,10 +21,13 @@ use crate::traffic::{
 
 use super::client::{CodexError, CodexHttpClient};
 use super::translate::model_allowlist::{
-    ALLOWED_MODELS, MODEL_ALIASES, assert_allowed_model, full_lane_web_search_model,
-    service_tier_for_model, split_tier_suffix, uses_responses_lite,
+    ALLOWED_MODELS, assert_allowed_model, full_lane_web_search_model, resolve_with_model_override,
+    uses_responses_lite,
 };
-use super::translate::request::ServiceTier;
+use super::translate::request::{
+    CodexOverrides, Effort, is_compact_message_text, is_compact_request, pick_service_tier,
+    resolve_codex_effort, to_codex_effort,
+};
 
 pub struct CodexNativeBackend {
     client: Arc<CodexHttpClient>,
@@ -42,19 +46,20 @@ impl CodexNativeBackend {
         }
     }
 
-    pub async fn handle(&self, mut body: Value, ctx: RequestContext) -> Response {
-        let resolved = match shape_native_request(&mut body) {
-            Ok(resolved) => resolved,
-            Err(response) => return response,
-        };
+    pub async fn handle(&self, request: NativeRequest, ctx: RequestContext) -> Response {
         if let Some(monitor) = ctx.monitor.as_ref() {
-            monitor.model_resolved(&ctx.req_id, &resolved.model);
+            monitor.model_resolved(&ctx.req_id, &request.model);
             monitor.upstream_started(&ctx.req_id);
         }
 
         let upstream = match self
             .client
-            .post_native_responses(&body, &ctx, resolved.use_responses_lite, resolved.stream)
+            .post_native_responses(
+                &request.body,
+                &ctx,
+                request.use_responses_lite,
+                request.stream,
+            )
             .await
         {
             Ok(response) => response,
@@ -65,15 +70,36 @@ impl CodexNativeBackend {
     }
 }
 
-struct NativeResolved {
-    model: String,
+/// A native Responses body with the Codex config applied, ready to send.
+pub struct NativeRequest {
+    pub body: Value,
+    pub model: String,
+    /// The effort sent upstream, for the monitor. Like chat, `none` reports
+    /// as no effort.
+    pub effort: Option<String>,
     use_responses_lite: bool,
     stream: bool,
 }
 
 #[allow(clippy::result_large_err)]
-pub fn validate_native_request_model(body: &Value) -> Result<String, Response> {
-    let object = body.as_object().ok_or_else(|| {
+pub fn shape_native_request(body: Value) -> Result<NativeRequest, Response> {
+    shape_native_request_with_overrides(
+        body,
+        config::codex_model().as_deref(),
+        &CodexOverrides::from_config(),
+    )
+}
+
+// The config's overrides come in as arguments, so tests never read the
+// developer's env or config.json. Every field the config does not cover
+// passes through as the client sent it.
+#[allow(clippy::result_large_err)]
+fn shape_native_request_with_overrides(
+    mut body: Value,
+    model_override: Option<&str>,
+    overrides: &CodexOverrides,
+) -> Result<NativeRequest, Response> {
+    let object = body.as_object_mut().ok_or_else(|| {
         openai_error(
             StatusCode::BAD_REQUEST,
             "invalid_request_error",
@@ -96,8 +122,10 @@ pub fn validate_native_request_model(body: &Value) -> Result<String, Response> {
                 None,
             )
         })?;
-    let (resolved, _) = resolve_native_model(&requested);
-    if let Err(error) = assert_allowed_model(&resolved) {
+    // The router matches the model without `[1m]`, so validation must too
+    let resolved =
+        resolve_with_model_override(&normalize_incoming_model(&requested), model_override);
+    if let Err(error) = assert_allowed_model(&resolved.model) {
         return Err(openai_error(
             StatusCode::BAD_REQUEST,
             "invalid_request_error",
@@ -110,56 +138,111 @@ pub fn validate_native_request_model(body: &Value) -> Result<String, Response> {
             Some("model_not_supported"),
         ));
     }
-    Ok(requested)
-}
-
-#[allow(clippy::result_large_err)]
-fn shape_native_request(body: &mut Value) -> Result<NativeResolved, Response> {
-    let requested = validate_native_request_model(body)?;
-    let object = body
-        .as_object_mut()
-        .expect("validated native Responses body must be an object");
-
-    let (mut model, service_tier) = resolve_native_model(&requested);
 
     let hosted_web_search = has_native_hosted_web_search(object);
-    if hosted_web_search {
-        model = full_lane_web_search_model(&model).to_string();
-    }
+    let model = if hosted_web_search {
+        full_lane_web_search_model(&resolved.model).to_string()
+    } else {
+        resolved.model
+    };
     object.insert("model".to_string(), Value::String(model.clone()));
+
+    // The override wins over the client's tier; the model suffix's tier only
+    // fills in a tier the client left out
+    let service_tier = pick_service_tier(
+        overrides.service_tier.as_deref(),
+        resolved.service_tier,
+        &model,
+    )
+    .map_err(config_error)?;
     if let Some(tier) = service_tier
-        && !object.contains_key("service_tier")
+        && (overrides.service_tier.is_some() || !object.contains_key("service_tier"))
     {
-        object.insert(
-            "service_tier".to_string(),
-            json!(service_tier_for_model(&model, tier)),
-        );
+        object.insert("service_tier".to_string(), json!(tier));
     }
 
-    Ok(NativeResolved {
+    let client_effort = object
+        .get("reasoning")
+        .and_then(|reasoning| reasoning.get("effort"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let request_effort = match client_effort.as_deref() {
+        Some("none") => Some(Effort::None),
+        effort => to_codex_effort(effort),
+    };
+    let effort = resolve_codex_effort(request_effort, overrides, is_compact_native_request(object))
+        .map_err(config_error)?;
+    // `none` goes on the wire as the messages endpoint sends it, so the
+    // override wins over the upstream default
+    if let Some(effort) = effort.as_ref() {
+        set_reasoning_effort(object, effort);
+    }
+
+    Ok(NativeRequest {
         use_responses_lite: uses_responses_lite(&model) && !hosted_web_search,
         model,
+        effort: effort
+            .map(|effort| effort.to_string())
+            .or(client_effort)
+            .filter(|effort| effort != "none"),
         stream: object
             .get("stream")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        body,
     })
 }
 
-fn resolve_native_model(requested: &str) -> (String, Option<ServiceTier>) {
-    // The router matches the model without `[1m]`, so validation must too
-    let requested = normalize_incoming_model(requested);
-    let requested = requested.as_str();
-    let (requested, service_tier) = match split_tier_suffix(requested) {
-        Some((base, tier)) => (base, Some(tier)),
-        None => (requested, None),
-    };
-    let model = MODEL_ALIASES
-        .iter()
-        .find(|(alias, _)| *alias == requested)
-        .map(|(_, target)| *target)
-        .unwrap_or(requested);
-    (model.to_string(), service_tier)
+fn set_reasoning_effort(object: &mut Map<String, Value>, effort: &Effort) {
+    let reasoning = object
+        .entry("reasoning")
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !reasoning.is_object() {
+        *reasoning = Value::Object(Map::new());
+    }
+    if let Some(reasoning) = reasoning.as_object_mut() {
+        reasoning.insert("effort".to_string(), json!(effort.to_string()));
+    }
+}
+
+/// The compaction markers the messages endpoint looks for, in a native body:
+/// the instructions, or the text of the last user input.
+fn is_compact_native_request(object: &Map<String, Value>) -> bool {
+    if is_compact_request(object.get("instructions").and_then(Value::as_str)) {
+        return true;
+    }
+    match object.get("input") {
+        Some(Value::String(text)) => is_compact_message_text(text),
+        Some(Value::Array(items)) => items.last().is_some_and(|item| {
+            item.get("role").and_then(Value::as_str) == Some("user")
+                && item.get("content").is_some_and(is_compact_native_content)
+        }),
+        _ => false,
+    }
+}
+
+fn is_compact_native_content(content: &Value) -> bool {
+    match content {
+        Value::String(text) => is_compact_message_text(text),
+        Value::Array(parts) => parts.iter().any(|part| {
+            part.get("text")
+                .and_then(Value::as_str)
+                .is_some_and(is_compact_message_text)
+        }),
+        _ => false,
+    }
+}
+
+/// An invalid override in the proxy's own config is a server fault, not the
+/// client's
+fn config_error(error: anyhow::Error) -> Response {
+    openai_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "api_error",
+        error.to_string(),
+        None,
+        None,
+    )
 }
 
 fn has_native_hosted_web_search(object: &Map<String, Value>) -> bool {
@@ -614,8 +697,18 @@ fn retain_boundary_prefix(bytes: &mut Vec<u8>) {
 mod tests {
     use super::*;
 
-    fn request(body: Value) -> Value {
-        body
+    // Without the config's overrides, so these never read the developer's
+    // env or config.json
+    #[allow(clippy::result_large_err)]
+    fn shape(body: Value) -> Result<NativeRequest, Response> {
+        shape_native_request_with_overrides(body, None, &CodexOverrides::default())
+    }
+
+    fn effort_override(effort: &str) -> CodexOverrides {
+        CodexOverrides {
+            effort: Some(effort.to_string()),
+            ..CodexOverrides::default()
+        }
     }
 
     fn observer_context() -> RequestContext {
@@ -694,93 +787,229 @@ mod tests {
 
     #[test]
     fn native_request_requires_object_and_model() {
-        assert!(shape_native_request(&mut json!([])).is_err());
-        assert!(shape_native_request(&mut json!({})).is_err());
-        assert!(shape_native_request(&mut json!({"model": 7})).is_err());
+        assert!(shape(json!([])).is_err());
+        assert!(shape(json!({})).is_err());
+        assert!(shape(json!({"model": 7})).is_err());
     }
 
     #[test]
     fn native_request_resolves_alias_and_fast_tier() {
-        let mut body = request(json!({"model":"claude-opus-5","input":[]}));
-        let resolved = shape_native_request(&mut body).unwrap();
+        let resolved = shape(json!({"model":"claude-opus-5","input":[]})).unwrap();
         assert_eq!(resolved.model, "gpt-6-sol");
-        assert_eq!(body["model"], "gpt-6-sol");
+        assert_eq!(resolved.body["model"], "gpt-6-sol");
         assert!(resolved.use_responses_lite);
 
-        let mut fast = request(json!({"model":"gpt-6-luna-fast","input":[]}));
-        let resolved = shape_native_request(&mut fast).unwrap();
-        assert_eq!(resolved.model, "gpt-6-luna");
-        assert_eq!(fast["service_tier"], "priority");
+        let fast = shape(json!({"model":"gpt-6-luna-fast","input":[]})).unwrap();
+        assert_eq!(fast.model, "gpt-6-luna");
+        assert_eq!(fast.body["service_tier"], "priority");
     }
 
     #[test]
     fn native_request_strips_context_suffix() {
-        let mut body = request(json!({"model":"gpt-6-sol[1m]","input":[]}));
-        let resolved = shape_native_request(&mut body).unwrap();
+        let resolved = shape(json!({"model":"gpt-6-sol[1m]","input":[]})).unwrap();
         assert_eq!(resolved.model, "gpt-6-sol");
-        assert_eq!(body["model"], "gpt-6-sol");
+        assert_eq!(resolved.body["model"], "gpt-6-sol");
     }
 
     #[test]
     fn native_request_preserves_parallel_tool_calls() {
         for parallel in [false, true] {
-            let mut body = request(json!({
+            let resolved = shape(json!({
                 "model":"gpt-6-luna",
                 "input":[],
                 "parallel_tool_calls":parallel
-            }));
-            shape_native_request(&mut body).unwrap();
-            assert_eq!(body["parallel_tool_calls"], parallel);
+            }))
+            .unwrap();
+            assert_eq!(resolved.body["parallel_tool_calls"], parallel);
         }
     }
 
     #[test]
     fn native_request_resolves_ultrafast_tier() {
-        let mut body = request(json!({"model":"gpt-6-astra-ultrafast","input":[]}));
-        let resolved = shape_native_request(&mut body).unwrap();
+        let resolved = shape(json!({"model":"gpt-6-astra-ultrafast","input":[]})).unwrap();
         assert_eq!(resolved.model, "gpt-6-astra");
-        assert_eq!(body["model"], "gpt-6-astra");
-        assert_eq!(body["service_tier"], "ultrafast");
+        assert_eq!(resolved.body["model"], "gpt-6-astra");
+        assert_eq!(resolved.body["service_tier"], "ultrafast");
 
-        let mut explicit = request(json!({
+        let explicit = shape(json!({
             "model":"gpt-6-astra-ultrafast",
             "service_tier":"priority",
             "input":[]
-        }));
-        shape_native_request(&mut explicit).unwrap();
-        assert_eq!(explicit["service_tier"], "priority");
+        }))
+        .unwrap();
+        assert_eq!(explicit.body["service_tier"], "priority");
     }
 
     #[test]
     fn native_request_rejects_ultrafast_suffix_without_the_tier() {
-        let mut body = request(json!({"model":"gpt-6-sol-ultrafast","input":[]}));
-        let response = shape_native_request(&mut body).err().unwrap();
+        let response = shape(json!({"model":"gpt-6-sol-ultrafast","input":[]}))
+            .err()
+            .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
     fn explicit_service_tier_is_preserved() {
-        let mut body = request(json!({
+        let resolved = shape(json!({
             "model":"gpt-6-luna-fast",
             "service_tier":"flex",
             "input":[]
-        }));
-        shape_native_request(&mut body).unwrap();
-        assert_eq!(body["service_tier"], "flex");
+        }))
+        .unwrap();
+        assert_eq!(resolved.body["service_tier"], "flex");
     }
 
     #[test]
     fn hosted_search_uses_full_lane_and_upgrades_luna() {
         for tool_type in ["web_search", "web_search_preview"] {
-            let mut body = request(json!({
+            let resolved = shape(json!({
                 "model":"gpt-5.6-luna",
                 "tools":[{"type":tool_type}],
                 "input":[]
-            }));
-            let resolved = shape_native_request(&mut body).unwrap();
+            }))
+            .unwrap();
             assert_eq!(resolved.model, "gpt-5.6-sol");
             assert!(!resolved.use_responses_lite);
         }
+    }
+
+    // The same model override chat and messages apply, validated after it
+    #[test]
+    fn model_override_wins_and_is_validated() {
+        let body = json!({"model":"gpt-6-sol-fast","input":[],"store":false});
+        let overrides = CodexOverrides::default();
+        let resolved =
+            shape_native_request_with_overrides(body.clone(), Some("gpt-6-astra"), &overrides)
+                .unwrap();
+        assert_eq!(resolved.model, "gpt-6-astra");
+        assert_eq!(resolved.body["model"], "gpt-6-astra");
+        assert_eq!(resolved.body["service_tier"], "priority");
+        assert_eq!(resolved.body["store"], false);
+
+        let response = shape_native_request_with_overrides(body, Some("gpt-7"), &overrides)
+            .err()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn service_tier_override_wins_and_narrows_to_the_model() {
+        let tier_of = |model: &str, override_tier: &str| {
+            let overrides = CodexOverrides {
+                service_tier: Some(override_tier.to_string()),
+                ..CodexOverrides::default()
+            };
+            let body = json!({"model":model,"service_tier":"default","input":[]});
+            shape_native_request_with_overrides(body, None, &overrides)
+                .map(|resolved| resolved.body["service_tier"].clone())
+                .map_err(|response| response.status())
+        };
+
+        assert_eq!(tier_of("gpt-5.6-sol", "flex").unwrap(), "flex");
+        assert_eq!(tier_of("gpt-5.6-sol-fast", "flex").unwrap(), "flex");
+        assert_eq!(tier_of("gpt-5.6-sol", "ultrafast").unwrap(), "priority");
+        assert_eq!(tier_of("gpt-6-astra", "ultrafast").unwrap(), "ultrafast");
+        assert_eq!(
+            tier_of("gpt-5.6-sol", "turbo").unwrap_err(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn effort_override_replaces_the_client_effort() {
+        let body = json!({
+            "model":"gpt-6-sol",
+            "input":[],
+            "reasoning":{"effort":"low","summary":"auto"}
+        });
+        let resolved =
+            shape_native_request_with_overrides(body.clone(), None, &effort_override("high"))
+                .unwrap();
+        assert_eq!(resolved.body["reasoning"]["effort"], "high");
+        assert_eq!(resolved.body["reasoning"]["summary"], "auto");
+        assert_eq!(resolved.effort.as_deref(), Some("high"));
+
+        let missing = shape_native_request_with_overrides(
+            json!({"model":"gpt-6-sol","input":[]}),
+            None,
+            &effort_override("xhigh"),
+        )
+        .unwrap();
+        assert_eq!(missing.body["reasoning"]["effort"], "xhigh");
+
+        let response = shape_native_request_with_overrides(body, None, &effort_override("turbo"))
+            .err()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    // `none` goes on the wire, as on the messages endpoint, and reports as
+    // no effort, as on both other endpoints
+    #[test]
+    fn none_effort_override_is_sent_and_reports_no_effort() {
+        let body = json!({"model":"gpt-6-sol","input":[],"reasoning":{"effort":"high"}});
+        let resolved =
+            shape_native_request_with_overrides(body, None, &effort_override("none")).unwrap();
+        assert_eq!(resolved.body["reasoning"]["effort"], "none");
+        assert_eq!(resolved.effort, None);
+    }
+
+    #[test]
+    fn client_effort_passes_through_without_overrides() {
+        for effort in ["high", "minimal", "none"] {
+            let resolved = shape(json!({
+                "model":"gpt-6-sol",
+                "input":[],
+                "reasoning":{"effort":effort}
+            }))
+            .unwrap();
+            assert_eq!(resolved.body["reasoning"]["effort"], effort);
+            assert_eq!(
+                resolved.effort.as_deref(),
+                (effort != "none").then_some(effort)
+            );
+        }
+        let resolved = shape(json!({"model":"gpt-6-sol","input":[]})).unwrap();
+        assert!(resolved.body.get("reasoning").is_none());
+        assert_eq!(resolved.effort, None);
+    }
+
+    #[test]
+    fn compaction_request_takes_the_effort_cap() {
+        let marker = "You are a helpful AI assistant tasked with summarizing conversations.";
+        let compact_text = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools. \
+            Your task is to create a detailed summary of the conversation so far";
+        for body in [
+            json!({
+                "model":"gpt-6-sol",
+                "instructions":marker,
+                "input":[],
+                "reasoning":{"effort":"high"}
+            }),
+            json!({
+                "model":"gpt-6-sol",
+                "input":[{"role":"user","content":[{"type":"input_text","text":compact_text}]}],
+                "reasoning":{"effort":"high"}
+            }),
+            json!({"model":"gpt-6-sol","input":compact_text}),
+        ] {
+            let resolved = shape(body).unwrap();
+            assert_eq!(resolved.body["reasoning"]["effort"], "low");
+            assert_eq!(resolved.effort.as_deref(), Some("low"));
+        }
+
+        let off = CodexOverrides {
+            compact_effort: Some("off".to_string()),
+            ..CodexOverrides::default()
+        };
+        let body = json!({
+            "model":"gpt-6-sol",
+            "instructions":marker,
+            "input":[],
+            "reasoning":{"effort":"high"}
+        });
+        let resolved = shape_native_request_with_overrides(body, None, &off).unwrap();
+        assert_eq!(resolved.body["reasoning"]["effort"], "high");
     }
 
     #[tokio::test]
