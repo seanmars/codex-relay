@@ -292,10 +292,11 @@ pub(crate) struct CodexOverrides {
 
 impl CodexOverrides {
     pub(crate) fn from_config() -> Self {
+        let config = config::codex_request_config();
         Self {
-            effort: config::codex_effort(),
-            service_tier: config::codex_service_tier(),
-            reasoning_summary: config::codex_reasoning_summary(),
+            effort: config.effort,
+            service_tier: config.service_tier,
+            reasoning_summary: config.reasoning_summary,
             compact_effort: std::env::var("CCP_COMPACT_EFFORT").ok(),
         }
     }
@@ -420,7 +421,7 @@ fn normalize_service_tier(tier: &str) -> Result<ServiceTier, anyhow::Error> {
 
 /// The configured override wins over the tier implied by the model name. Either
 /// one is narrowed to a tier the upstream `model` offers.
-fn pick_service_tier(
+pub(crate) fn pick_service_tier(
     override_tier: Option<&str>,
     model_tier: Option<ServiceTier>,
     model: &str,

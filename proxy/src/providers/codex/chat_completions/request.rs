@@ -5,9 +5,12 @@ use crate::providers::codex::translate::{
     model_allowlist::{
         ALLOWED_MODELS, assert_allowed_model, resolve_with_model_override, uses_responses_lite,
     },
-    request::{Effort, resolve_effort_override, to_codex_effort},
+    request::{Effort, pick_service_tier, resolve_effort_override, to_codex_effort},
 };
-use crate::{config, registry::normalize_incoming_model};
+use crate::{
+    config::{self, CodexRequestConfig},
+    registry::normalize_incoming_model,
+};
 
 use super::ChatError;
 
@@ -35,19 +38,14 @@ pub struct TranslatedRequest {
 }
 
 pub fn translate_request(body: Value) -> Result<TranslatedRequest, ChatError> {
-    translate_request_with_overrides(
-        body,
-        config::codex_model().as_deref(),
-        config::codex_effort().as_deref(),
-    )
+    translate_request_with_overrides(body, &config::codex_request_config())
 }
 
-// The config's overrides come in as arguments, so tests never read the
-// process-wide config that other tests point elsewhere while they run
+// The config's overrides come in as an argument, so tests never read the
+// developer's env or config.json
 pub(super) fn translate_request_with_overrides(
     body: Value,
-    model_override: Option<&str>,
-    effort_override: Option<&str>,
+    overrides: &CodexRequestConfig,
 ) -> Result<TranslatedRequest, ChatError> {
     let object = body
         .as_object()
@@ -56,7 +54,7 @@ pub(super) fn translate_request_with_overrides(
 
     let requested_model = required_string(object, "model")?;
     let normalized = normalize_incoming_model(&requested_model);
-    let resolved = resolve_with_model_override(&normalized, model_override);
+    let resolved = resolve_with_model_override(&normalized, overrides.model.as_deref());
     assert_allowed_model(&resolved.model).map_err(|error| {
         ChatError::invalid(
             format!(
@@ -110,15 +108,14 @@ pub(super) fn translate_request_with_overrides(
             ));
         }
     };
-    let effort = resolve_effort_override(request_effort, effort_override).map_err(|error| {
-        ChatError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "api_error",
-            error.to_string(),
-            None,
-            None,
-        )
-    })?;
+    let effort = resolve_effort_override(request_effort, overrides.effort.as_deref())
+        .map_err(config_error)?;
+    let service_tier = pick_service_tier(
+        overrides.service_tier.as_deref(),
+        resolved.service_tier,
+        &resolved.model,
+    )
+    .map_err(config_error)?;
 
     let mut text = Map::from_iter([("verbosity".to_string(), json!("low"))]);
     if let Some(format) = translate_response_format(object.get("response_format"))? {
@@ -134,7 +131,7 @@ pub(super) fn translate_request_with_overrides(
         ("client_metadata".to_string(), json!({"lite":"true"})),
         ("text".to_string(), Value::Object(text)),
     ]);
-    if let Some(tier) = resolved.service_tier {
+    if let Some(tier) = service_tier {
         upstream.insert(
             "service_tier".to_string(),
             serde_json::to_value(tier).unwrap(),
@@ -313,6 +310,18 @@ fn parse_effort(value: &str) -> Result<Option<Effort>, ChatError> {
     })
 }
 
+/// An invalid override in the proxy's own config is a server fault, not the
+/// client's
+fn config_error(error: anyhow::Error) -> ChatError {
+    ChatError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "api_error",
+        error.to_string(),
+        None,
+        None,
+    )
+}
+
 fn translate_response_format(value: Option<&Value>) -> Result<Option<Value>, ChatError> {
     let Some(value) = value.filter(|value| !value.is_null()) else {
         return Ok(None);
@@ -449,7 +458,7 @@ mod tests {
     // Without the config's overrides: config tests point the config dir at
     // files of their own while these run in parallel
     fn translate(body: Value) -> Result<TranslatedRequest, ChatError> {
-        translate_request_with_overrides(body, None, None)
+        translate_request_with_overrides(body, &CodexRequestConfig::default())
     }
 
     fn base() -> Value {
@@ -561,9 +570,51 @@ mod tests {
         }
         let mut body = base();
         body["reasoning_effort"] = json!("low");
-        let translated = translate_request_with_overrides(body, None, Some("high")).unwrap();
+        let overrides = CodexRequestConfig {
+            effort: Some("high".to_string()),
+            ..Default::default()
+        };
+        let translated = translate_request_with_overrides(body, &overrides).unwrap();
         assert_eq!(translated.upstream["reasoning"]["effort"], "high");
         assert_eq!(translated.effort.as_deref(), Some("high"));
+    }
+
+    // The same override and narrowing the messages path applies
+    #[test]
+    fn service_tier_override_wins_and_narrows_to_the_model() {
+        let tier_of = |model: &str, override_tier: &str| {
+            let mut body = base();
+            body["model"] = json!(model);
+            let overrides = CodexRequestConfig {
+                service_tier: Some(override_tier.to_string()),
+                ..Default::default()
+            };
+            translate_request_with_overrides(body, &overrides).map(|translated| {
+                translated.upstream["service_tier"]
+                    .as_str()
+                    .map(str::to_string)
+            })
+        };
+
+        assert_eq!(
+            tier_of("gpt-5.6-sol", "flex").unwrap().as_deref(),
+            Some("flex")
+        );
+        assert_eq!(
+            tier_of("gpt-5.6-sol-fast", "flex").unwrap().as_deref(),
+            Some("flex")
+        );
+        assert_eq!(
+            tier_of("gpt-5.6-sol", "ultrafast").unwrap().as_deref(),
+            Some("priority")
+        );
+        assert_eq!(
+            tier_of("gpt-6-astra", "ultrafast").unwrap().as_deref(),
+            Some("ultrafast")
+        );
+        let error = tier_of("gpt-5.6-sol", "turbo").unwrap_err();
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(error.message.contains("turbo"), "{}", error.message);
     }
 
     #[test]

@@ -299,7 +299,11 @@ mod tests {
     // Without the config's overrides: config tests point the config dir at
     // files of their own while these run in parallel
     fn translate(body: Value) -> TranslatedRequest {
-        request::translate_request_with_overrides(body, None, None).unwrap()
+        request::translate_request_with_overrides(
+            body,
+            &crate::config::CodexRequestConfig::default(),
+        )
+        .unwrap()
     }
 
     fn context(monitor: MonitorHandle) -> RequestContext {

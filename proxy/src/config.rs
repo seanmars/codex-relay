@@ -47,7 +47,7 @@ struct FileConfig {
     pub opencode: Option<OpenCodeConfig>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Default)]
 struct CodexConfig {
     #[serde(rename = "baseUrl")]
     pub base_url: Option<String>,
@@ -814,66 +814,41 @@ fn codex_images_base_url_for_env(env: &HashMap<String, String>) -> String {
     "https://chatgpt.com/backend-api/codex".to_string()
 }
 
-pub fn codex_service_tier() -> Option<String> {
-    let env: HashMap<_, _> = std::env::vars().collect();
-    if let Some(raw) = env.get("CCP_CODEX_SERVICE_TIER") {
-        return Some(raw.clone());
-    }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
-        && let Some(codex) = file.codex
-    {
-        return codex.service_tier;
-    }
-    None
+/// The Codex settings a request applies, read with one pass over the env
+/// and `config.json`. An empty value counts as unset, in the env and in the
+/// file alike, so an exported-but-empty variable falls through to the file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CodexRequestConfig {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub service_tier: Option<String>,
+    pub reasoning_summary: Option<String>,
 }
 
-pub fn codex_effort() -> Option<String> {
-    let env: HashMap<_, _> = std::env::vars().collect();
-    if let Some(raw) = env.get("CCP_CODEX_EFFORT") {
-        return Some(raw.clone());
-    }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
-        && let Some(codex) = file.codex
-    {
-        return codex.effort;
-    }
-    None
+pub fn codex_request_config() -> CodexRequestConfig {
+    codex_request_config_for_env(&std::env::vars().collect())
 }
 
-pub fn codex_reasoning_summary() -> Option<String> {
-    codex_reasoning_summary_for_env(&std::env::vars().collect())
-}
-
-fn codex_reasoning_summary_for_env(env: &HashMap<String, String>) -> Option<String> {
-    if let Some(raw) = env
-        .get("CCP_CODEX_REASONING_SUMMARY")
-        .filter(|raw| !raw.is_empty())
-    {
-        return Some(raw.clone());
+fn codex_request_config_for_env(env: &HashMap<String, String>) -> CodexRequestConfig {
+    let file = file_config_for_env(env)
+        .and_then(|file| file.codex)
+        .unwrap_or_default();
+    let pick = |key: &str, from_file: Option<String>| {
+        env.get(key)
+            .filter(|raw| !raw.is_empty())
+            .cloned()
+            .or(from_file.filter(|raw| !raw.is_empty()))
+    };
+    CodexRequestConfig {
+        model: pick("CCP_CODEX_MODEL", file.model),
+        effort: pick("CCP_CODEX_EFFORT", file.effort),
+        service_tier: pick("CCP_CODEX_SERVICE_TIER", file.service_tier),
+        reasoning_summary: pick("CCP_CODEX_REASONING_SUMMARY", file.reasoning_summary),
     }
-    if let Some(file) = file_config_for_env(env)
-        && let Some(codex) = file.codex
-        && let Some(summary) = codex.reasoning_summary.filter(|raw| !raw.is_empty())
-    {
-        return Some(summary);
-    }
-    None
 }
 
 pub fn codex_model() -> Option<String> {
-    let env: HashMap<_, _> = std::env::vars().collect();
-    if let Some(raw) = env.get("CCP_CODEX_MODEL") {
-        return Some(raw.clone());
-    }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
-        && let Some(codex) = file.codex
-    {
-        return codex.model;
-    }
-    None
+    codex_request_config().model
 }
 
 pub fn auto_review_model() -> Option<String> {
@@ -1504,7 +1479,9 @@ mod tests {
         let env = config_env(&config);
 
         assert_eq!(
-            codex_reasoning_summary_for_env(&env).as_deref(),
+            codex_request_config_for_env(&env)
+                .reasoning_summary
+                .as_deref(),
             Some("off")
         );
     }
@@ -1524,13 +1501,69 @@ mod tests {
             "auto".to_string(),
         );
         assert_eq!(
-            codex_reasoning_summary_for_env(&env).as_deref(),
+            codex_request_config_for_env(&env)
+                .reasoning_summary
+                .as_deref(),
             Some("auto")
         );
         env.insert("CCP_CODEX_REASONING_SUMMARY".to_string(), String::new());
         assert_eq!(
-            codex_reasoning_summary_for_env(&env).as_deref(),
+            codex_request_config_for_env(&env)
+                .reasoning_summary
+                .as_deref(),
             Some("off")
+        );
+    }
+
+    #[test]
+    fn codex_request_config_env_overrides_file_and_empty_counts_as_unset() {
+        let config = tempfile::TempDir::new().unwrap();
+        let mut env = config_env(&config);
+        assert_eq!(
+            codex_request_config_for_env(&env),
+            CodexRequestConfig::default()
+        );
+
+        std::fs::write(
+            config.path().join("config.json"),
+            r#"{"codex":{"model":"gpt-6-sol","effort":"low","serviceTier":"flex"}}"#,
+        )
+        .unwrap();
+        let from_file = CodexRequestConfig {
+            model: Some("gpt-6-sol".to_string()),
+            effort: Some("low".to_string()),
+            service_tier: Some("flex".to_string()),
+            reasoning_summary: None,
+        };
+        assert_eq!(codex_request_config_for_env(&env), from_file);
+
+        for key in [
+            "CCP_CODEX_MODEL",
+            "CCP_CODEX_EFFORT",
+            "CCP_CODEX_SERVICE_TIER",
+        ] {
+            env.insert(key.to_string(), String::new());
+        }
+        assert_eq!(codex_request_config_for_env(&env), from_file);
+
+        env.insert("CCP_CODEX_MODEL".to_string(), "gpt-6-luna".to_string());
+        env.insert("CCP_CODEX_EFFORT".to_string(), "high".to_string());
+        env.insert("CCP_CODEX_SERVICE_TIER".to_string(), "priority".to_string());
+        let resolved = codex_request_config_for_env(&env);
+        assert_eq!(resolved.model.as_deref(), Some("gpt-6-luna"));
+        assert_eq!(resolved.effort.as_deref(), Some("high"));
+        assert_eq!(resolved.service_tier.as_deref(), Some("priority"));
+
+        std::fs::write(
+            config.path().join("config.json"),
+            r#"{"codex":{"effort":"","serviceTier":""}}"#,
+        )
+        .unwrap();
+        env.clear();
+        env.extend(config_env(&config));
+        assert_eq!(
+            codex_request_config_for_env(&env),
+            CodexRequestConfig::default()
         );
     }
 
