@@ -3,7 +3,7 @@ use serde_json::{Map, Value, json};
 
 use crate::providers::codex::translate::{
     model_allowlist::{
-        ALLOWED_MODELS, assert_allowed_model, resolve_model_request, uses_responses_lite,
+        ALLOWED_MODELS, assert_allowed_model, resolve_with_model_override, uses_responses_lite,
     },
     request::{Effort, resolve_effort_override, to_codex_effort},
 };
@@ -35,11 +35,18 @@ pub struct TranslatedRequest {
 }
 
 pub fn translate_request(body: Value) -> Result<TranslatedRequest, ChatError> {
-    translate_request_with_override(body, config::codex_effort().as_deref())
+    translate_request_with_overrides(
+        body,
+        config::codex_model().as_deref(),
+        config::codex_effort().as_deref(),
+    )
 }
 
-fn translate_request_with_override(
+// The config's overrides come in as arguments, so tests never read the
+// process-wide config that other tests point elsewhere while they run
+fn translate_request_with_overrides(
     body: Value,
+    model_override: Option<&str>,
     effort_override: Option<&str>,
 ) -> Result<TranslatedRequest, ChatError> {
     let object = body
@@ -49,7 +56,7 @@ fn translate_request_with_override(
 
     let requested_model = required_string(object, "model")?;
     let normalized = normalize_incoming_model(&requested_model);
-    let resolved = resolve_model_request(&normalized);
+    let resolved = resolve_with_model_override(&normalized, model_override);
     assert_allowed_model(&resolved.model).map_err(|error| {
         ChatError::invalid(
             format!(
@@ -439,13 +446,19 @@ fn validate_sampling_value(param: &'static str, value: &Value) -> Result<(), Cha
 mod tests {
     use super::*;
 
+    // Without the config's overrides: config tests point the config dir at
+    // files of their own while these run in parallel
+    fn translate(body: Value) -> Result<TranslatedRequest, ChatError> {
+        translate_request_with_overrides(body, None, None)
+    }
+
     fn base() -> Value {
         json!({"model":"gpt-5.6-sol","messages":[{"role":"system","content":"rules"},{"role":"user","content":[{"type":"text","text":"hello"}]}]})
     }
 
     #[test]
     fn translates_messages_and_responses_lite_fields() {
-        let translated = translate_request(base()).unwrap();
+        let translated = translate(base()).unwrap();
         assert_eq!(translated.upstream["input"][0]["role"], "developer");
         assert_eq!(
             translated.upstream["input"][1]["content"][0]["text"],
@@ -471,7 +484,7 @@ mod tests {
         ] {
             let mut body = base();
             body["model"] = json!(model);
-            let translated = translate_request(body).unwrap();
+            let translated = translate(body).unwrap();
             assert_eq!(translated.upstream["model"], upstream_model, "{model}");
             assert_eq!(
                 translated
@@ -485,14 +498,14 @@ mod tests {
 
         let mut body = base();
         body["model"] = json!("gpt-6-sol-ultrafast");
-        assert!(translate_request(body).is_err());
+        assert!(translate(body).is_err());
     }
 
     #[test]
     fn none_effort_retains_context() {
         let mut body = base();
         body["reasoning_effort"] = json!("none");
-        let translated = translate_request(body).unwrap();
+        let translated = translate(body).unwrap();
         assert!(translated.upstream["reasoning"].get("effort").is_none());
         assert_eq!(translated.upstream["reasoning"]["context"], "all_turns");
     }
@@ -501,7 +514,7 @@ mod tests {
     fn translates_strict_json_schema() {
         let mut body = base();
         body["response_format"] = json!({"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object"}}});
-        let translated = translate_request(body).unwrap();
+        let translated = translate(body).unwrap();
         assert_eq!(translated.upstream["text"]["format"]["name"], "answer");
         assert_eq!(translated.upstream["text"]["format"]["strict"], true);
     }
@@ -511,12 +524,12 @@ mod tests {
         let mut empty = base();
         empty["messages"][0]["content"] = json!("");
         assert_eq!(
-            translate_request(empty).unwrap_err().param.as_deref(),
+            translate(empty).unwrap_err().param.as_deref(),
             Some("messages[0].content")
         );
         let mut tokens = base();
         tokens["max_tokens"] = json!(100);
-        let error = translate_request(tokens).unwrap_err();
+        let error = translate(tokens).unwrap_err();
         assert_eq!(error.code.as_deref(), Some("unsupported_parameter"));
         assert_eq!(error.param.as_deref(), Some("max_tokens"));
     }
@@ -524,14 +537,14 @@ mod tests {
     #[test]
     fn requires_model_and_nonempty_messages() {
         assert_eq!(
-            translate_request(json!({"messages":[{"role":"user","content":"hello"}]}))
+            translate(json!({"messages":[{"role":"user","content":"hello"}]}))
                 .unwrap_err()
                 .param
                 .as_deref(),
             Some("model")
         );
         assert_eq!(
-            translate_request(json!({"model":"gpt-5.6-sol","messages":[]}))
+            translate(json!({"model":"gpt-5.6-sol","messages":[]}))
                 .unwrap_err()
                 .param
                 .as_deref(),
@@ -544,11 +557,11 @@ mod tests {
         for effort in ["none", "low", "medium", "high", "xhigh", "max"] {
             let mut body = base();
             body["reasoning_effort"] = json!(effort);
-            assert!(translate_request_with_override(body, None).is_ok());
+            assert!(translate(body).is_ok());
         }
         let mut body = base();
         body["reasoning_effort"] = json!("low");
-        let translated = translate_request_with_override(body, Some("high")).unwrap();
+        let translated = translate_request_with_overrides(body, None, Some("high")).unwrap();
         assert_eq!(translated.upstream["reasoning"]["effort"], "high");
         assert_eq!(translated.effort.as_deref(), Some("high"));
     }
@@ -558,14 +571,14 @@ mod tests {
         let mut options = base();
         options["stream_options"] = json!({"include_usage":true});
         assert_eq!(
-            translate_request(options).unwrap_err().param.as_deref(),
+            translate(options).unwrap_err().param.as_deref(),
             Some("stream_options")
         );
 
         let mut lite = base();
         lite["temperature"] = json!(0.2);
         assert_eq!(
-            translate_request(lite).unwrap_err().code.as_deref(),
+            translate(lite).unwrap_err().code.as_deref(),
             Some("unsupported_parameter")
         );
 
@@ -576,7 +589,7 @@ mod tests {
             request["model"] = json!(model);
             request["top_p"] = json!(0.9);
             assert_eq!(
-                translate_request(request).unwrap_err().param.as_deref(),
+                translate(request).unwrap_err().param.as_deref(),
                 Some("top_p"),
                 "{model}"
             );
