@@ -1580,7 +1580,9 @@ pub(crate) struct CodexCli;
 
 impl CliHandlers for CodexCli {
     fn login(&self) -> Result<(), anyhow::Error> {
-        refuse_with_codex_cli_source("codex login")?;
+        if run_codex_cli_when_it_owns_sign_in(&["login"])? {
+            return Ok(());
+        }
         let tokens = run_browser_login()?;
         let store = file_store();
         let manager = CodexAuthManager::new(store);
@@ -1593,7 +1595,9 @@ impl CliHandlers for CodexCli {
     }
 
     fn device(&self) -> Result<(), anyhow::Error> {
-        refuse_with_codex_cli_source("codex login")?;
+        if run_codex_cli_when_it_owns_sign_in(&["login", "--device-auth"])? {
+            return Ok(());
+        }
         let tokens = DeviceAuthClient::new().run()?;
         let store = file_store();
         let manager = CodexAuthManager::new(store);
@@ -1625,7 +1629,9 @@ impl CliHandlers for CodexCli {
     }
 
     fn logout(&self) -> Result<(), anyhow::Error> {
-        refuse_with_codex_cli_source("codex logout")?;
+        if run_codex_cli_when_it_owns_sign_in(&["logout"])? {
+            return Ok(());
+        }
         let store = file_store();
         store.clear_auth()?;
         println!("Logged out");
@@ -1694,15 +1700,31 @@ pub fn print_usage(json: bool) -> Result<(), anyhow::Error> {
 // CLI helpers
 // ---------------------------------------------------------------------------
 
-/// With `codex.authSource = "codex-cli"` Codex CLI owns the sign-in, so the
-/// proxy's own login and logout would act on a credential nothing reads.
-fn refuse_with_codex_cli_source(command: &str) -> Result<(), anyhow::Error> {
-    if config::codex_auth_source() == config::CodexAuthSource::CodexCli {
-        anyhow::bail!(
-            "codex.authSource is \"codex-cli\", so Codex CLI owns the sign-in. Run: {command}"
-        );
+/// With `codex.authSource = "codex-cli"` Codex CLI owns the sign-in, so login
+/// and logout run Codex CLI's own command in this terminal and report `true`.
+fn run_codex_cli_when_it_owns_sign_in(args: &[&str]) -> Result<bool, anyhow::Error> {
+    if config::codex_auth_source() != config::CodexAuthSource::CodexCli {
+        return Ok(false);
     }
-    Ok(())
+    let command_line = format!("codex {}", args.join(" "));
+    // `CCP_CODEX_CLI` names the executable outright. Otherwise an npm install
+    // of Codex CLI is `codex.cmd` on Windows, which only cmd runs.
+    let mut command = if let Some(program) = std::env::var_os("CCP_CODEX_CLI") {
+        std::process::Command::new(program)
+    } else if cfg!(windows) {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "codex"]);
+        command
+    } else {
+        std::process::Command::new("codex")
+    };
+    let status = command.args(args).status().map_err(|err| {
+        anyhow::anyhow!("Could not run `{command_line}`: {err}. Install Codex CLI first")
+    })?;
+    if !status.success() {
+        anyhow::bail!("`{command_line}` failed ({status})");
+    }
+    Ok(true)
 }
 
 fn now_ms() -> u64 {

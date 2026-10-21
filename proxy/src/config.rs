@@ -981,7 +981,7 @@ pub fn codex_auth_source() -> CodexAuthSource {
     {
         return source;
     }
-    CodexAuthSource::Proxy
+    CodexAuthSource::CodexCli
 }
 
 /// Writes `codex.authSource` into `config.json` and keeps every other key.
@@ -1276,20 +1276,20 @@ mod tests {
         let config = tempfile::TempDir::new().unwrap();
         let _env = isolated_env(&config);
 
-        assert_eq!(codex_auth_source(), CodexAuthSource::Proxy);
+        assert_eq!(codex_auth_source(), CodexAuthSource::CodexCli);
         std::fs::write(
             config.path().join("config.json"),
-            r#"{"codex":{"authSource":"codex-cli"}}"#,
+            r#"{"codex":{"authSource":"proxy"}}"#,
         )
         .unwrap();
-        assert_eq!(codex_auth_source(), CodexAuthSource::CodexCli);
+        assert_eq!(codex_auth_source(), CodexAuthSource::Proxy);
         {
-            let _source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
-            assert_eq!(codex_auth_source(), CodexAuthSource::Proxy);
+            let _source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "codex-cli");
+            assert_eq!(codex_auth_source(), CodexAuthSource::CodexCli);
         }
         {
             let _source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "invalid");
-            assert_eq!(codex_auth_source(), CodexAuthSource::CodexCli);
+            assert_eq!(codex_auth_source(), CodexAuthSource::Proxy);
         }
         assert_eq!(CodexAuthSource::CodexCli.as_str(), "codex-cli");
     }

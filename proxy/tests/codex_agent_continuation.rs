@@ -95,6 +95,7 @@ fn configure_environment(config_dir: &Path, upstream_url: &str) -> Vec<EnvGuard>
         EnvGuard::set("NO_PROXY", "127.0.0.1,localhost"),
         EnvGuard::set("no_proxy", "127.0.0.1,localhost"),
         EnvGuard::set("CCP_CONFIG_DIR", config_dir),
+        EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy"),
         EnvGuard::set("CCP_ALIAS_PROVIDER", "codex"),
         EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket"),
         EnvGuard::set("CCP_CODEX_BASE_URL", upstream_url),

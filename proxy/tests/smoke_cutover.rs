@@ -313,6 +313,7 @@ async fn assert_codex_http_retries_structural_body_error(first_body: Vec<u8>) {
         spawn_retrying_truncated_http_upstream(first_body, success_body, attempts.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -370,6 +371,7 @@ async fn assert_codex_http_presemantic_retry(first_response: Vec<u8>) {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -994,6 +996,7 @@ async fn smoke_codex_http_messages_uses_mock_upstream() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages("gpt-5.5").await;
@@ -1030,6 +1033,7 @@ async fn smoke_codex_native_responses_preserves_parallel_tool_calls() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let response = call_responses_body(json!({
         "model":"gpt-5.4",
@@ -1179,6 +1183,7 @@ async fn smoke_codex_http_usage_limit_event_fast_fails_live_request() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -1226,6 +1231,7 @@ async fn smoke_codex_http_header_only_usage_limit_event_fast_fails_live_request(
     });
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", format!("http://{addr}"));
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -1259,6 +1265,7 @@ async fn smoke_codex_http_usage_limit_event_fast_fails_buffered_request() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages("gpt-5.5").await;
@@ -1290,6 +1297,7 @@ async fn smoke_codex_http_retries_empty_completion() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
 
@@ -1333,6 +1341,7 @@ async fn smoke_codex_http_retries_empty_message_completion() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
 
@@ -1372,6 +1381,7 @@ async fn smoke_codex_http_stream_retries_empty_completion() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
 
@@ -1419,6 +1429,7 @@ async fn smoke_codex_http_empty_completions_exhaust_to_service_unavailable() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
 
@@ -1477,6 +1488,7 @@ async fn smoke_auto_review_uses_codex_default_and_configured_override() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let _codex_model_env = EnvGuard::set("CCP_CODEX_MODEL", "gpt-5.6-sol");
@@ -1545,6 +1557,7 @@ async fn smoke_codex_http_server_compaction_fast_fails_usage_limit() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let _compaction_env = EnvGuard::set("CCP_CODEX_SERVER_COMPACTION", "1");
@@ -1617,6 +1630,7 @@ async fn smoke_codex_http_server_compaction_replays_native_history() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let _compaction_env = EnvGuard::set("CCP_CODEX_SERVER_COMPACTION", "1");
@@ -1720,6 +1734,7 @@ async fn smoke_codex_http_compaction_failure_preserves_portable_summary() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let _compaction_env = EnvGuard::set("CCP_CODEX_SERVER_COMPACTION", "1");
@@ -1761,6 +1776,7 @@ async fn smoke_codex_http_context_window_error_requests_compaction() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages("gpt-5.5").await;
@@ -1805,6 +1821,7 @@ async fn smoke_codex_http_traffic_capture_writes_upstream_artifacts() {
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages("gpt-5.5").await;
@@ -1853,6 +1870,7 @@ async fn smoke_codex_http_stream_traffic_captures_downstream_events() {
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -1933,6 +1951,7 @@ async fn smoke_codex_http_stream_returns_before_upstream_completion() {
     });
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = tokio::time::timeout(
@@ -2076,6 +2095,7 @@ async fn smoke_codex_http_incomplete_after_text_is_an_error() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -2122,6 +2142,7 @@ async fn smoke_codex_http_preserves_permanent_policy_failure() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages("gpt-5.5").await;
@@ -2163,6 +2184,7 @@ async fn smoke_codex_http_rate_limit_snapshot_does_not_end_response() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -2230,6 +2252,7 @@ async fn smoke_codex_http_usage_limit_status_fast_fails_live_request() {
     });
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -2275,6 +2298,7 @@ async fn smoke_codex_http_bounds_initial_status_retries() {
     });
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -2330,6 +2354,7 @@ async fn smoke_codex_http_does_not_retry_overload_after_semantic_output() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -2381,6 +2406,7 @@ async fn smoke_codex_http_stops_after_retry_limit() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -2435,6 +2461,7 @@ async fn smoke_codex_http_cancels_retry_backoff_when_request_drops() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let request = tokio::spawn(call_messages_body(json!({
@@ -2473,6 +2500,7 @@ async fn smoke_codex_http_body_error_after_semantic_output_preserves_message() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -2524,6 +2552,7 @@ async fn smoke_codex_http_body_error_after_closed_tool_is_not_success() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
@@ -2570,6 +2599,7 @@ async fn smoke_codex_http_truncated_upstream_writes_reducer_diagnostic() {
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages("gpt-5.5").await;
@@ -2600,6 +2630,7 @@ async fn smoke_codex_auto_fallback_usage_limit_fast_fails_live_request() {
             .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "auto");
     let response = call_messages_body(json!({
@@ -2637,6 +2668,7 @@ async fn smoke_codex_websocket_messages_uses_mock_upstream() {
     let upstream = spawn_websocket_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let response = call_messages("gpt-5.5").await;
@@ -2680,6 +2712,7 @@ async fn smoke_codex_websocket_usage_limit_fast_fails_request() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let upstream = spawn_websocket_usage_limit_upstream(attempts.clone()).await;
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
@@ -2706,6 +2739,7 @@ async fn smoke_codex_websocket_uses_credits_after_included_limit() {
 
     let upstream = spawn_websocket_credited_rate_limit_upstream().await;
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
@@ -2735,6 +2769,7 @@ async fn smoke_codex_websocket_stream_uses_credits_after_included_limit() {
 
     let upstream = spawn_websocket_credited_rate_limit_upstream().await;
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
@@ -2773,6 +2808,7 @@ async fn smoke_codex_websocket_stream_returns_delta_before_terminal() {
     let upstream = spawn_websocket_delayed_terminal_upstream().await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
@@ -2827,6 +2863,7 @@ async fn smoke_codex_websocket_context_window_error_requests_compaction() {
     let upstream = spawn_websocket_error_upstream("input exceeds context window").await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
@@ -2867,6 +2904,7 @@ async fn smoke_codex_websocket_stream_uses_previous_response_id() {
     let upstream = spawn_websocket_sequence_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
@@ -2933,6 +2971,7 @@ async fn smoke_codex_websocket_stream_retries_missing_previous_response_id() {
     let upstream = spawn_websocket_previous_missing_then_retry_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
@@ -2997,6 +3036,7 @@ async fn smoke_codex_websocket_stream_retries_empty_close_with_full_context() {
     let upstream = spawn_websocket_close_then_retry_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
@@ -3079,6 +3119,7 @@ async fn smoke_codex_websocket_stream_retries_terminal_only_completion_with_full
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
@@ -3161,6 +3202,7 @@ async fn smoke_codex_websocket_empty_completions_exhaust_to_service_unavailable(
     let upstream = spawn_websocket_always_empty_completion_upstream(request_count.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
@@ -3210,6 +3252,7 @@ async fn smoke_codex_websocket_previous_response_id_sends_delta_on_second_turn()
     let upstream = spawn_websocket_sequence_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
@@ -3309,6 +3352,7 @@ async fn smoke_codex_websocket_traffic_capture_writes_upstream_artifacts() {
     let _traffic_env = EnvGuard::set("CCP_TRAFFIC_LOG", "1");
     let _state_env = EnvGuard::set("XDG_STATE_HOME", state.path());
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+    let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let response = call_messages("gpt-5.5").await;

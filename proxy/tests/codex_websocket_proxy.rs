@@ -84,6 +84,7 @@ fn clear_proxy_environment() -> Vec<EnvGuard> {
 fn configure_codex(config_dir: &Path, base_url: &str) -> Vec<EnvGuard> {
     vec![
         EnvGuard::set("CCP_CONFIG_DIR", config_dir),
+        EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy"),
         EnvGuard::set("CCP_ALIAS_PROVIDER", "codex"),
         EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket"),
         EnvGuard::set("CCP_CODEX_BASE_URL", base_url),

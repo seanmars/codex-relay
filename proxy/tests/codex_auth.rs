@@ -10,6 +10,7 @@ fn codex_cmd() -> (Command, TempDir) {
     cmd.args(["codex", "auth", "status"]);
     cmd.env("CCP_CONFIG_DIR", temp.path());
     cmd.env("HOME", temp.path());
+    cmd.env("CCP_CODEX_AUTH_SOURCE", "proxy");
     (cmd, temp)
 }
 
@@ -207,20 +208,24 @@ fn codex_auth_source_saves_and_shows_source() -> Result<(), Box<dyn std::error::
         .stdout
         .clone();
     let out = String::from_utf8(out)?;
-    assert!(out.starts_with("Source: proxy\n"), "{out}");
+    assert!(out.starts_with("Source: codex-cli\n"), "{out}");
+    assert!(out.contains("Sign in with: codex login"), "{out}");
 
-    let out = codex_auth_source_cmd(&temp, Some("codex-cli"))
+    let out = codex_auth_source_cmd(&temp, Some("proxy"))
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
     let out = String::from_utf8(out)?;
-    assert!(out.contains("Source: codex-cli\n"), "{out}");
-    assert!(out.contains("Sign in with: codex login"), "{out}");
+    assert!(out.contains("Source: proxy\n"), "{out}");
+    assert!(
+        out.contains("Sign in with: claude-code-proxy codex auth login"),
+        "{out}"
+    );
     let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&config)?)?;
     assert_eq!(saved["port"], 19000);
-    assert_eq!(saved["codex"]["authSource"], "codex-cli");
+    assert_eq!(saved["codex"]["authSource"], "proxy");
 
     let output = codex_auth_source_cmd(&temp, Some("chatgpt")).output()?;
     assert!(!output.status.success());
@@ -247,13 +252,30 @@ fn codex_auth_source_reports_env_override() -> Result<(), Box<dyn std::error::Er
 }
 
 #[test]
-fn codex_cli_source_logout_keeps_codex_cli_sign_in() -> Result<(), Box<dyn std::error::Error>> {
+fn codex_cli_source_logout_runs_codex_cli() -> Result<(), Box<dyn std::error::Error>> {
+    // The proxy binary stands in for Codex CLI: it rejects `logout`, which
+    // shows the command ran, and the real Codex CLI sign-in is never touched.
     let (mut cmd, temp) = codex_cli_source_cmd("logout");
+    cmd.env(
+        "CCP_CODEX_CLI",
+        assert_cmd::cargo::cargo_bin("claude-code-proxy"),
+    );
     let auth = write_codex_cli_auth(&temp);
     let output = cmd.output()?;
     assert!(!output.status.success());
     let err = String::from_utf8(output.stderr)?;
-    assert!(err.contains("Run: codex logout"), "{err}");
+    assert!(err.contains("`codex logout` failed"), "{err}");
     assert!(auth.exists());
+    Ok(())
+}
+
+#[test]
+fn codex_cli_source_login_without_codex_cli_says_so() -> Result<(), Box<dyn std::error::Error>> {
+    let (mut cmd, temp) = codex_cli_source_cmd("login");
+    cmd.env("CCP_CODEX_CLI", temp.path().join("missing-codex"));
+    let output = cmd.output()?;
+    assert!(!output.status.success());
+    let err = String::from_utf8(output.stderr)?;
+    assert!(err.contains("Could not run `codex login`"), "{err}");
     Ok(())
 }
