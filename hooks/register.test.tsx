@@ -30,10 +30,10 @@ const props = { hasSurvey: false, isWorking: false, maxRows: 40, bodyColumns: 10
 const relayCmd = (args: string) => ({ command: 'relay', args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } })
 
 // The engine and the relay beneath the plugin, recording what the plugin asked of them
-function world(on: On, opts: { up: boolean; baseUrl?: string; answer?: () => Health; contextPercent?: number }) {
+function world(on: On, opts: { up: boolean; baseUrl?: string; answer?: () => Health; contextPercent?: number; pluginVersion?: string }) {
   const env: Record<string, string | undefined> = { OS: 'Windows_NT', USERPROFILE: 'C:/Users/u', ANTHROPIC_BASE_URL: opts.baseUrl }
   const seen = { statuses: [] as (string | undefined)[], toasts: [] as string[], posts: [] as unknown[], agents: [] as unknown[], runs: [] as string[][] }
-  mock.clock(on)
+  const clock = mock.clock(on)
   on('env.get', (_$, e) => ({ value: env[e.name] }))
   on('env.set', (_$, e) => {
     env[e.name] = e.value
@@ -41,7 +41,7 @@ function world(on: On, opts: { up: boolean; baseUrl?: string; answer?: () => Hea
   })
   on('session.id', () => ({ value: 's1' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: opts.contextPercent }, rateLimits: [] } }))
-  on('fs.read', () => ({ value: '{}' }))
+  on('fs.read', (_$, e) => ({ value: e.path.endsWith('plugin.json') ? JSON.stringify({ version: opts.pluginVersion ?? '0.1.0' }) : '{}' }))
   on('ui.status', (_$, e) => {
     seen.statuses.push(e.text)
     return { value: undefined }
@@ -71,7 +71,7 @@ function world(on: On, opts: { up: boolean; baseUrl?: string; answer?: () => Hea
     const { Box } = $.ui.resolve(e)
     return <Box key="engine" />
   })
-  return { env, seen }
+  return { env, seen, clock }
 }
 
 const START = { cwd: '/', surface: 'terminal', isInteractive: true } as const
@@ -117,6 +117,53 @@ test('with the relay down and not starting, the session keeps its address and sa
   // It tried: the detached start, then the wait for the relay
   expect(seen.runs[0]?.[0]).toBe('powershell.exe')
   expect(seen.runs[1]?.slice(-2)).toEqual(['wait', '10'])
+})
+
+const restartArgs = ['restart', '--if-stale', '--if-idle']
+const restarted = (runs: string[][]) => runs.some((argv) => argv.slice(-3).join(' ') === restartArgs.join(' '))
+
+test('a relay older than the plugin is restarted while it answers nothing', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const { seen } = world(on, { up: true, pluginVersion: '0.2.0' })
+  await $.session.start(START)
+  expect(restarted(seen.runs)).toBe(true)
+  expect(seen.toasts.some((t) => t.includes('已重啟') && t.includes('0.2.0'))).toBe(true)
+})
+
+test('a busy, current or newer relay is not restarted; an older one is once it is idle', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  let answer = health({ inflight: 1 })
+  const { seen, clock } = world(on, { up: true, pluginVersion: '0.2.0', answer: () => answer })
+  await $.session.start(START)
+  answer = health({ version: '0.2.0' })
+  await clock.advance(10000)
+  answer = health({ version: '0.3.0' })
+  await clock.advance(10000)
+  expect(restarted(seen.runs)).toBe(false)
+  answer = health()
+  await clock.advance(10000)
+  expect(restarted(seen.runs)).toBe(true)
+})
+
+test("another config dir's relay on our port is not used, not restarted and not replaced", async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const { env, seen } = world(on, { up: true, pluginVersion: '0.2.0', answer: () => health({ configDir: 'D:\\other\\.claude', configDirArg: 'D:/other/.claude' }) })
+  await $.session.start(START)
+
+  expect(env.ANTHROPIC_BASE_URL).toBeUndefined()
+  expect(seen.statuses.at(-1)).toBe('⇄ port 屬於 D:\\other\\.claude 的 relay: 直連 Claude')
+  expect(seen.toasts.filter((t) => t.includes('D:\\other\\.claude'))).toHaveLength(1)
+  expect(seen.runs).toEqual([])
+  expect((await $.command.run(relayCmd('codex'))).text).toContain('另一個 config dir')
+  expect((await $.command.run(relayCmd('status'))).text).toContain('另一個 config dir')
+  expect(seen.posts).toEqual([])
+})
+
+test('our own config dir in another spelling is ours', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const { env } = world(on, { up: true, answer: () => health({ configDir: 'c:\\users\\u\\.claude\\', configDirArg: 'C:/Users/u/.claude' }) })
+  await $.session.start(START)
+  expect(env.ANTHROPIC_BASE_URL).toBe(RELAY)
 })
 
 test('/relay codex and /relay claude pin this session; /relay status reports it', async ($, on) => {

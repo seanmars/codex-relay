@@ -13,6 +13,7 @@ import * as L from './logic.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const dir = process.argv[2] || L.claudeConfigDir()
+const REAL_DIR = L.realDir(dir)
 const CFG_FILE = L.configFile(dir)
 const STATE_FILE = L.stateFile(dir)
 const LOG_FILE = L.logFile(dir)
@@ -89,6 +90,8 @@ const json = (res, obj, status = 200) => {
 const relayBody = (ur, res) => pipeline(ur, res, () => {})
 
 function send(base, req, res, body, headers) {
+  // The caller left while the Codex proxy was starting: its 'close' already fired, so nothing would stop this request
+  if (res.destroyed) return
   const u = new URL(base)
   const lib = u.protocol === 'http:' ? http : https
   const up = lib.request(
@@ -265,7 +268,8 @@ async function control(req, res, body) {
       ok: true,
       pid: process.pid,
       version: VERSION,
-      configDir: dir,
+      configDir: REAL_DIR,
+      configDirArg: dir, // as given on the command line; the hook compares its own spelling against both
       port: server.address().port,
       inflight,
       defaultRoute: cfg.defaultRoute,
@@ -292,10 +296,13 @@ async function control(req, res, body) {
     return json(res, { ok: true, session: { sid, route, pinned: true } })
   }
   if (u.pathname === '/__shutdown' && req.method === 'POST') {
-    let stopProxy = false
+    let ask = {}
     try {
-      stopProxy = Boolean(JSON.parse(body.toString('utf8') || '{}').proxy)
+      ask = JSON.parse(body.toString('utf8') || '{}') || {}
     } catch {}
+    const stopProxy = Boolean(ask.proxy)
+    // Checked here, not by the caller: no request can start between this check and the exit
+    if (ask.ifIdle && inflight > 0) return json(res, { ok: false, busy: inflight }, 409)
     json(res, { ok: true, pid: process.pid, stoppedProxy: stopProxy && proxyChild ? proxyChild.pid : null })
     log(`shutdown requested${stopProxy ? ' (with proxy)' : ''}`)
     if (stopProxy && proxyChild) {
@@ -312,7 +319,7 @@ async function control(req, res, body) {
 
 // ---------- dispatch ----------
 function dispatch(req, res) {
-  if (!L.isLocalRequest(req.headers, server.address().port)) {
+  if (!req.url.startsWith('/') || !L.isLocalRequest(req.headers, server.address().port)) {
     return apiError(res, 403, 'only local programs may use the relay (Host 127.0.0.1 or localhost on the relay port, no browser requests)')
   }
   const cfg = readCfg()
@@ -347,8 +354,30 @@ server = http.createServer(dispatch)
 const PORT = readCfg().port
 server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
-    log(`port ${PORT} is already in use; this relay (pid ${process.pid}) exits`)
-    process.exit(0)
+    // The hook starts a relay only after a failed health check, so finding our own relay here is a startup race
+    const refuse = (h) => {
+      const other = h && h.configDir
+      if (other && L.sameDir(other, REAL_DIR)) process.exit(0)
+      log(
+        `port ${PORT} is already used by ${other ? `another codex-relay (config dir ${other})` : 'an unknown process'}; this relay (config dir ${REAL_DIR}) did not start. Set another "port" in ${CFG_FILE}`,
+      )
+      process.exit(1)
+    }
+    const r = http.get({ host: '127.0.0.1', port: PORT, path: '/__health', timeout: 2000 }, (ur) => {
+      const ch = []
+      ur.on('data', (c) => ch.push(c))
+      ur.on('end', () => {
+        let h = null
+        try {
+          const j = JSON.parse(Buffer.concat(ch).toString('utf8'))
+          if (j && j.ok === true && j.pid) h = j
+        } catch {}
+        refuse(h)
+      })
+    })
+    r.on('error', () => refuse(null))
+    r.on('timeout', () => refuse(null))
+    return
   }
   log(`server error: ${e.message}`)
   process.exit(1)

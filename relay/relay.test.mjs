@@ -54,7 +54,14 @@ function call(port, method, urlPath, { body, headers = {} } = {}) {
   })
 }
 
-const anthropic = fakeServer('anthropic')
+// GET /slow is answered only when the test calls releaseSlow, so it stays in flight until then
+let releaseSlow = () => {}
+const anthropic = fakeServer('anthropic', (req, res) => {
+  if (req.url !== '/slow') return false
+  releaseSlow = () => res.end('{}')
+  res.writeHead(200, { 'content-type': 'application/json' })
+  return true
+})
 const monitorSessions = []
 const proxy = fakeServer('proxy', (req, res) => {
   if (req.url !== '/monitor') return false
@@ -66,22 +73,25 @@ let dir
 let relayPort
 let relay
 
+// Starts a relay for a config dir with this config, and waits until it answers
+async function startRelay(configDir, cfg, cwd) {
+  fs.writeFileSync(path.join(configDir, 'codex-relay.json'), JSON.stringify(cfg))
+  const child = spawn(process.execPath, [path.join(here, 'relay.mjs'), configDir], { stdio: 'ignore', cwd })
+  for (let i = 0; i < 50; i++) {
+    const up = await call(cfg.port, 'GET', '/__health').catch(() => null)
+    if (up?.json?.ok) return child
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  child.kill()
+  throw new Error('relay did not start')
+}
+
 before(async () => {
   const anthropicPort = await listen(anthropic.server)
   const proxyPort = await listen(proxy.server)
   relayPort = await freePort()
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-relay-test-'))
-  fs.writeFileSync(
-    path.join(dir, 'codex-relay.json'),
-    JSON.stringify({ port: relayPort, proxyPort, claudeUrl: `http://127.0.0.1:${anthropicPort}`, proxyCommand: path.join(dir, 'missing-proxy') }),
-  )
-  relay = spawn(process.execPath, [path.join(here, 'relay.mjs'), dir], { stdio: 'ignore' })
-  for (let i = 0; i < 50; i++) {
-    const up = await call(relayPort, 'GET', '/__health').catch(() => null)
-    if (up?.json?.ok) return
-    await new Promise((r) => setTimeout(r, 100))
-  }
-  throw new Error('relay did not start')
+  relay = await startRelay(dir, { port: relayPort, proxyPort, claudeUrl: `http://127.0.0.1:${anthropicPort}`, proxyCommand: path.join(dir, 'missing-proxy') })
 })
 
 after(async () => {
@@ -144,6 +154,24 @@ test('a browser or another host is refused', async () => {
   assert.equal(foreign.status, 403)
   const browser = await call(relayPort, 'GET', '/__health', { headers: { origin: 'https://evil.test' } })
   assert.equal(browser.status, 403)
+  const before = anthropic.seen.length
+  const absolute = await call(relayPort, 'POST', 'http://evil.test/v1/messages', { body: message('claude-opus-4-8'), headers: sidHeaders('sid-claude') })
+  assert.equal(absolute.status, 403)
+  assert.equal(anthropic.seen.length, before)
+})
+
+test('health names the config dir, and a shutdown asked to wait for idle refuses while a request is in flight', async () => {
+  const h = await call(relayPort, 'GET', '/__health')
+  assert.equal(h.json.configDirArg, dir)
+  assert.equal(h.json.configDir, fs.realpathSync.native(dir))
+  const slow = call(relayPort, 'GET', '/slow')
+  await new Promise((r) => setTimeout(r, 200))
+  const busy = await call(relayPort, 'POST', '/__shutdown', { body: { ifIdle: true } })
+  assert.equal(busy.status, 409)
+  assert.equal(busy.json.busy, 1)
+  releaseSlow()
+  await slow
+  assert.equal((await call(relayPort, 'GET', '/__health')).json.ok, true)
 })
 
 test('a codex call with the proxy down and no proxy command answers 502 with the reason', async () => {
@@ -153,6 +181,62 @@ test('a codex call with the proxy down and no proxy command answers 502 with the
   assert.equal(r.status, 502)
   assert.equal(r.json.type, 'error')
   assert.match(r.json.error.message, /cannot start/)
+})
+
+test('a second relay on a taken port exits quietly for the same config dir and names the other dir otherwise', async () => {
+  const exitCode = (configDir) =>
+    new Promise((resolve) => spawn(process.execPath, [path.join(here, 'relay.mjs'), configDir], { stdio: 'ignore' }).on('exit', resolve))
+  assert.equal(await exitCode(dir), 0)
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-relay-other-'))
+  try {
+    fs.writeFileSync(path.join(other, 'codex-relay.json'), JSON.stringify({ port: relayPort }))
+    assert.equal(await exitCode(other), 1)
+    assert.ok(fs.readFileSync(path.join(other, 'codex-relay.log'), 'utf8').includes(fs.realpathSync.native(dir)))
+  } finally {
+    fs.rmSync(other, { recursive: true, force: true })
+  }
+})
+
+test('a codex call whose caller left while the proxy was starting never reaches the proxy', async () => {
+  const cdir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-relay-left-'))
+  // The relay runs `<proxyCommand> serve --port N`: with node as the command, this file is the proxy. It opens its
+  // port after 1.5 s, records every model call it gets, and quits by itself.
+  fs.writeFileSync(
+    path.join(cdir, 'serve'),
+    `const http = require('http'), fs = require('fs'), path = require('path')
+const port = Number(process.argv[process.argv.indexOf('--port') + 1])
+setTimeout(() => http.createServer((req, res) => {
+  if (req.method === 'POST') fs.appendFileSync(path.join(__dirname, 'seen.txt'), req.url + '\\n')
+  res.end('{}')
+}).listen(port, '127.0.0.1'), 1500)
+setTimeout(() => process.exit(0), 5000)
+`,
+  )
+  const port = await freePort()
+  const left = await startRelay(cdir, { port, proxyPort: await freePort(), proxyCommand: process.execPath }, cdir)
+  try {
+    await new Promise((resolve) => {
+      const r = http.request({ host: '127.0.0.1', port, path: '/v1/messages', method: 'POST', headers: { 'content-type': 'application/json' } })
+      r.on('error', resolve)
+      r.end(JSON.stringify(message('gpt-5.6-terra')))
+      setTimeout(() => (r.destroy(), resolve()), 300)
+    })
+    await new Promise((r) => setTimeout(r, 3000))
+    assert.equal(fs.existsSync(path.join(cdir, 'seen.txt')), false)
+  } finally {
+    await call(port, 'POST', '/__shutdown', { body: { proxy: true } }).catch(() => null)
+    left.kill()
+    if (left.exitCode === null && left.signalCode === null) await new Promise((r) => left.once('exit', r))
+    // Windows keeps a directory that is still a process's working directory
+    for (let i = 0; i < 40; i++) {
+      try {
+        fs.rmSync(cdir, { recursive: true, force: true })
+        break
+      } catch {
+        await new Promise((r) => setTimeout(r, 250))
+      }
+    }
+  }
 })
 
 test('pinned sessions are saved for the next relay', async () => {

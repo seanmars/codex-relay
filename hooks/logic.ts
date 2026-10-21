@@ -35,6 +35,36 @@ export function parseHealth(text: string): Health | null {
 
 export const isRoute = (v: string): v is Route => v === 'claude' || v === 'codex'
 
+// The directory of a relay that answers on our port but serves another config dir; null when it is ours
+export function foreignConfigDir(h: Health | null, myDir: string, isWin: boolean): string | null {
+  const dirs = [h?.configDir, h?.configDirArg].filter((d): d is string => typeof d === 'string' && d.length > 0)
+  if (dirs.length === 0) return null
+  const key = (d: string) => {
+    const s = d.replace(/\\/g, '/').replace(/\/+$/, '')
+    return isWin ? s.toLowerCase() : s
+  }
+  return dirs.some((d) => key(d) === key(myDir)) ? null : dirs[0]!
+}
+
+export const foreignReport = (cfg: LocalCfg, dir: string) =>
+  `codex-relay: ${relayUrl(cfg)} 是另一個 config dir (${dir}) 的 relay, 這個視窗直連 Claude. 在 codex-relay.json 為兩邊設定不同的 port.`
+
+// -1, 0 or 1 for dotted numeric versions; a missing part counts as 0
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d < 0 ? -1 : 1
+  }
+  return 0
+}
+
+// The relay runs older code than this plugin. A newer relay is left alone, so two sessions on different plugin
+// versions never take turns restarting it.
+export const relayIsStale = (h: Health, pluginVersion: string) =>
+  Boolean(h.version && pluginVersion && compareVersions(h.version, pluginVersion) < 0)
+
 export const AGENT_NAME = 'codex'
 export const AGENT_TYPE = `codex-relay:${AGENT_NAME}`
 
@@ -84,6 +114,8 @@ export const RELAY_ICON = '⇄'
 export function statusText(h: Health | null, contextPercent?: number): string {
   return `${RELAY_ICON} ${statusBody(h, contextPercent)}`
 }
+
+export const foreignStatusText = (dir: string) => `${RELAY_ICON} port 屬於 ${dir} 的 relay: 直連 Claude`
 
 function statusBody(h: Health | null, contextPercent?: number): string {
   if (!h) return 'codex-relay 離線: 直連 Claude'

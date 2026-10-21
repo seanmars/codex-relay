@@ -9,10 +9,14 @@ import {
   HELP,
   type LocalCfg,
   agentSpec,
+  foreignConfigDir,
+  foreignReport,
+  foreignStatusText,
   isRoute,
   parseArgs,
   parseHealth,
   parseLocalCfg,
+  relayIsStale,
   relayUrl,
   runText,
   startArgv,
@@ -32,6 +36,22 @@ let lastHealthSig = ''
 let agentModel = ''
 // ANTHROPIC_BASE_URL as it was before this plugin set it, put back when the relay is gone
 let savedBaseUrl: { value: string | undefined } | null = null
+let pluginVersion: string | null = null
+let lastStaleTry = 0
+// The config dir of another profile's relay that holds our port, and the last one a toast named
+let foreignDir: string | null = null
+let foreignTold: string | null = null
+
+async function myVersion($: EngineInterface): Promise<string> {
+  if (pluginVersion === null) {
+    try {
+      pluginVersion = String(JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)).version ?? '')
+    } catch {
+      pluginVersion = ''
+    }
+  }
+  return pluginVersion
+}
 
 async function configDir($: EngineInterface): Promise<string> {
   const dir = await $.env.get('CLAUDE_CONFIG_DIR')
@@ -55,13 +75,28 @@ async function runCli($: EngineInterface, cfg: LocalCfg, args: string[], timeout
   return $.process.run([cfg.nodePath, cliScript($), ...args], { timeoutMs })
 }
 
+// The relay's answer, or null when none answers. Another config dir's relay on our port counts as none: this session
+// never routes through it, and foreignDir names it.
 async function fetchHealth($: EngineInterface, cfg: LocalCfg, sid: string, usage = false): Promise<Health | null> {
+  let h: Health | null = null
   try {
     const r = await $.http.fetch(`${relayUrl(cfg)}/__health?sid=${encodeURIComponent(sid)}${usage ? '&usage=1' : ''}`)
-    return r.ok ? parseHealth(r.text) : null
-  } catch {
-    return null
-  }
+    h = r.ok ? parseHealth(r.text) : null
+  } catch {}
+  foreignDir = foreignConfigDir(h, await configDir($), await isWindows($))
+  return foreignDir ? null : h
+}
+
+// `plugin update` leaves the old relay running, and tick starts one only when none answers: replace it here, but only
+// while it answers nothing, so no session loses a reply. A busy relay is tried again a minute later.
+async function replaceStale($: EngineInterface, cfg: LocalCfg, h: Health): Promise<boolean> {
+  if (h.inflight > 0 || Date.now() - lastStaleTry < 60000 || !relayIsStale(h, await myVersion($))) return false
+  lastStaleTry = Date.now()
+  lastStart = Date.now()
+  const r = await runCli($, cfg, ['restart', '--if-stale', '--if-idle']).catch(() => null)
+  if (r?.exitCode !== 0) return false
+  $.ui.toast(`codex-relay: relay 已重啟, 改跑這個 plugin 的版本 (${await myVersion($)}).`)
+  return true
 }
 
 // Starts the relay detached from this session, then waits for it outside the hook's own time
@@ -102,7 +137,7 @@ async function contextPercent($: EngineInterface, h: Health | null): Promise<num
 }
 
 async function publish($: EngineInterface, h: Health | null): Promise<void> {
-  const text = statusText(h, await contextPercent($, h))
+  const text = foreignDir ? foreignStatusText(foreignDir) : statusText(h, await contextPercent($, h))
   if (text !== lastStatus) {
     lastStatus = text
     $.ui.status(text)
@@ -122,7 +157,13 @@ async function tick($: EngineInterface): Promise<void> {
     const cfg = await readCfg($)
     const sid = await $.session.id()
     let h = await fetchHealth($, cfg, sid)
-    if (!h && Date.now() - lastStart > 15000) {
+    if (h && (await replaceStale($, cfg, h))) h = await fetchHealth($, cfg, sid)
+    if (foreignDir && foreignDir !== foreignTold) {
+      foreignTold = foreignDir
+      $.ui.toast(foreignReport(cfg, foreignDir))
+    }
+    // A port another config dir's relay holds is not ours to start a relay on
+    if (!h && !foreignDir && Date.now() - lastStart > 15000) {
       h = await startRelay($, cfg, sid)
       if (!h && !startFailedTold) {
         startFailedTold = true
@@ -148,6 +189,8 @@ async function refresh($: EngineInterface, usage = false): Promise<Health | null
 async function switchRoute($: EngineInterface, route: Route): Promise<{ ok: boolean; text: string }> {
   const cfg = await readCfg($)
   const sid = await $.session.id()
+  await fetchHealth($, cfg, sid)
+  if (foreignDir) return { ok: false, text: foreignReport(cfg, foreignDir) }
   try {
     const r = await $.http.fetch(`${relayUrl(cfg)}/__session`, {
       method: 'POST',
@@ -228,7 +271,7 @@ function panelActions($: EngineInterface): PanelActions {
       lastStart = 0
       await tick($)
       const h = await refresh($)
-      await note(h ? 'Relay 已啟動' : 'Relay 無法啟動, 查看 codex-relay.log', Boolean(h))
+      await note(h ? 'Relay 已啟動' : foreignDir ? foreignReport(await readCfg($), foreignDir) : 'Relay 無法啟動, 查看 codex-relay.log', Boolean(h))
     },
     close: () => void update($, panelUi, () => ({ open: false, confirmingClaude: false, busy: false })),
   }
@@ -254,8 +297,10 @@ async function runCommand($: EngineInterface, args: string): Promise<string> {
       }
       return isRoute(route) ? setDefault($, route) : `預設只能是 codex 或 claude, 收到 "${route}".`
     }
-    case 'status':
-      return statusReport(await refresh($, true), cfg, Math.floor(Date.now() / 1000))
+    case 'status': {
+      const h = await refresh($, true)
+      return foreignDir ? foreignReport(cfg, foreignDir) : statusReport(h, cfg, Math.floor(Date.now() / 1000))
+    }
     case 'usage':
       return runProxyCli($, cfg, ['codex', 'usage'])
     case 'models':
