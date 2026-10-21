@@ -87,10 +87,6 @@ fn resolve_tier_model_alias(model: &str) -> ResolvedModel {
     }
 }
 
-pub fn resolve_model_request(model: &str) -> ResolvedModel {
-    resolve_model_request_with_config_override(model, true)
-}
-
 pub fn resolve_model_request_with_config_override(
     model: &str,
     apply_config_override: bool,
@@ -124,10 +120,6 @@ pub fn resolve_with_model_override(model: &str, override_model: Option<&str>) ->
         model: resolved.model,
         service_tier,
     }
-}
-
-pub fn resolve_model(model: &str) -> String {
-    resolve_model_request(model).model
 }
 
 #[derive(Debug, Clone)]
@@ -192,7 +184,7 @@ mod tests {
 
     #[test]
     fn haiku_resolves_to_luna() {
-        let r = resolve_model_request("haiku");
+        let r = resolve_with_model_override("haiku", None);
         assert_eq!(r.model, "gpt-6-luna");
     }
 
@@ -208,26 +200,26 @@ mod tests {
 
     #[test]
     fn sonnet_resolves_to_terra() {
-        let r = resolve_model_request("sonnet");
+        let r = resolve_with_model_override("sonnet", None);
         assert_eq!(r.model, "gpt-5.6-terra");
     }
 
     #[test]
     fn sonnet_5_resolves_to_terra() {
-        let r = resolve_model_request("claude-sonnet-5");
+        let r = resolve_with_model_override("claude-sonnet-5", None);
         assert_eq!(r.model, "gpt-5.6-terra");
     }
 
     #[test]
     fn opus_resolves_to_sol() {
-        let r = resolve_model_request("opus");
+        let r = resolve_with_model_override("opus", None);
         assert_eq!(r.model, "gpt-6-sol");
     }
 
     #[test]
     fn opus_aliases_resolve_to_sol() {
         for model in ["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5"] {
-            let r = resolve_model_request(model);
+            let r = resolve_with_model_override(model, None);
             assert_eq!(r.model, "gpt-6-sol");
         }
     }
@@ -235,7 +227,7 @@ mod tests {
     #[test]
     fn fable_5_resolves_to_sol() {
         for model in ["fable", "claude-fable-5"] {
-            let r = resolve_model_request(model);
+            let r = resolve_with_model_override(model, None);
             assert_eq!(r.model, "gpt-6-sol");
         }
     }
@@ -243,7 +235,7 @@ mod tests {
     #[test]
     fn gpt_6_sol_fast_adds_priority() {
         for model in ["gpt-6-sol", "gpt-6.1-sol"] {
-            let r = resolve_model_request(&format!("{model}-fast"));
+            let r = resolve_with_model_override(&format!("{model}-fast"), None);
             assert_eq!(r.model, model);
             assert_eq!(r.service_tier, Some(ServiceTier::Priority));
         }
@@ -258,7 +250,7 @@ mod tests {
 
     #[test]
     fn fast_suffix_adds_priority() {
-        let r = resolve_model_request("gpt-5.6-sol-fast");
+        let r = resolve_with_model_override("gpt-5.6-sol-fast", None);
         assert_eq!(r.model, "gpt-5.6-sol");
         assert_eq!(r.service_tier, Some(ServiceTier::Priority));
     }

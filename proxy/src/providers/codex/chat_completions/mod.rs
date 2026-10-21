@@ -296,6 +296,12 @@ mod tests {
         net::TcpListener,
     };
 
+    // Without the config's overrides: config tests point the config dir at
+    // files of their own while these run in parallel
+    fn translate(body: Value) -> TranslatedRequest {
+        request::translate_request_with_overrides(body, None, None).unwrap()
+    }
+
     fn context(monitor: MonitorHandle) -> RequestContext {
         monitor.request_started(
             "chat-test",
@@ -379,12 +385,12 @@ mod tests {
     async fn buffered_request_translates_upstream_and_downstream() {
         const SSE: &[u8] = b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"{\\\"answer\\\":\\\"yes\\\"}\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_buffered\",\"model\":\"gpt-5.6-sol\",\"status\":\"completed\",\"usage\":{\"input_tokens\":8,\"output_tokens\":4}}}\n\n";
         let (backend, server) = mock_backend(SSE).await;
-        let request = request::translate_request(json!({
+        let request = translate(json!({
             "model":"gpt-5.6-sol",
             "messages":[{"role":"system","content":"JSON only"},{"role":"user","content":"answer"}],
             "reasoning_effort":"low",
             "response_format":{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object"}}}
-        })).unwrap();
+        }));
         let monitor = MonitorHandle::new(10);
         let response = backend.handle(request, context(monitor.clone())).await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -418,13 +424,12 @@ mod tests {
     async fn streaming_request_emits_chat_chunks_usage_and_done() {
         const SSE: &[u8] = b"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_stream\",\"model\":\"gpt-5.6-sol\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream\",\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n";
         let (backend, server) = mock_backend(SSE).await;
-        let request = request::translate_request(json!({
+        let request = translate(json!({
             "model":"gpt-5.6-sol",
             "messages":[{"role":"user","content":"hello"}],
             "stream":true,
             "stream_options":{"include_usage":true}
-        }))
-        .unwrap();
+        }));
         let response = backend
             .handle(request, context(MonitorHandle::new(10)))
             .await;

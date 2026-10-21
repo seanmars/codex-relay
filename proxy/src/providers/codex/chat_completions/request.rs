@@ -44,7 +44,7 @@ pub fn translate_request(body: Value) -> Result<TranslatedRequest, ChatError> {
 
 // The config's overrides come in as arguments, so tests never read the
 // process-wide config that other tests point elsewhere while they run
-fn translate_request_with_overrides(
+pub(super) fn translate_request_with_overrides(
     body: Value,
     model_override: Option<&str>,
     effort_override: Option<&str>,
