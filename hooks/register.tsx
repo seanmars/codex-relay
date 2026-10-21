@@ -95,8 +95,14 @@ async function syncAgent($: EngineInterface, model: string): Promise<void> {
   if (done) agentModel = model
 }
 
+// The context fill as the engine counts it; read only on Codex, where the line shows it
+async function contextPercent($: EngineInterface, h: Health | null): Promise<number | undefined> {
+  if (h?.session.route !== 'codex') return undefined
+  return (await $.session.usage().catch(() => undefined))?.context.percent
+}
+
 async function publish($: EngineInterface, h: Health | null): Promise<void> {
-  const text = statusText(h)
+  const text = statusText(h, await contextPercent($, h))
   if (text !== lastStatus) {
     lastStatus = text
     $.ui.status(text)

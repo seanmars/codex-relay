@@ -30,7 +30,7 @@ const props = { hasSurvey: false, isWorking: false, maxRows: 40, bodyColumns: 10
 const relayCmd = (args: string) => ({ command: 'relay', args, origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 100 } })
 
 // The engine and the relay beneath the plugin, recording what the plugin asked of them
-function world(on: On, opts: { up: boolean; baseUrl?: string; answer?: () => Health }) {
+function world(on: On, opts: { up: boolean; baseUrl?: string; answer?: () => Health; contextPercent?: number }) {
   const env: Record<string, string | undefined> = { OS: 'Windows_NT', USERPROFILE: 'C:/Users/u', ANTHROPIC_BASE_URL: opts.baseUrl }
   const seen = { statuses: [] as (string | undefined)[], toasts: [] as string[], posts: [] as unknown[], agents: [] as unknown[], runs: [] as string[][] }
   mock.clock(on)
@@ -40,6 +40,7 @@ function world(on: On, opts: { up: boolean; baseUrl?: string; answer?: () => Hea
     return { value: {} }
   })
   on('session.id', () => ({ value: 's1' }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000, percent: opts.contextPercent }, rateLimits: [] } }))
   on('fs.read', () => ({ value: '{}' }))
   on('ui.status', (_$, e) => {
     seen.statuses.push(e.text)
@@ -77,12 +78,12 @@ const START = { cwd: '/', surface: 'terminal', isInteractive: true } as const
 
 test('with the relay up, the session goes through it and the status line shows the Codex session', async ($, on) => {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
-  const { env, seen } = world(on, { up: true, baseUrl: 'http://127.0.0.1:8950' })
+  const { env, seen } = world(on, { up: true, baseUrl: 'http://127.0.0.1:8950', contextPercent: 42 })
   await $.session.start(START)
 
   expect(env.ANTHROPIC_BASE_URL).toBe(RELAY)
   expect(seen.toasts.some((t) => t.includes('http://127.0.0.1:8950'))).toBe(true)
-  expect(seen.statuses.at(-1)).toBe('Codex gpt-5.6-terra · 12.3k in / 678 out · 5h 23% · 週 41%')
+  expect(seen.statuses.at(-1)).toBe('⇄ Codex gpt-5.6-terra · ctx 42% · 5h 23% · 週 41%')
   expect(seen.agents).toEqual([expect.objectContaining({ name: 'codex', model: 'gpt-5.6-terra' })])
 })
 
@@ -101,7 +102,8 @@ test('a plan with only a weekly window, in the primary slot, is labelled by its 
     })
   const { seen } = world(on, { up: true, answer })
   await $.session.start(START)
-  expect(seen.statuses.at(-1)).toBe('Codex gpt-6-sol · 18.7k in / 5 out · 週 14%')
+  // No context reading yet: the line leaves it out
+  expect(seen.statuses.at(-1)).toBe('⇄ Codex gpt-6-sol · 週 14%')
 })
 
 test('with the relay down and not starting, the session keeps its address and says so', async ($, on) => {
@@ -110,7 +112,7 @@ test('with the relay down and not starting, the session keeps its address and sa
   await $.session.start(START)
 
   expect(env.ANTHROPIC_BASE_URL).toBeUndefined()
-  expect(seen.statuses.at(-1)).toBe('codex-relay 離線: 直連 Claude')
+  expect(seen.statuses.at(-1)).toBe('⇄ codex-relay 離線: 直連 Claude')
   expect(seen.toasts.some((t) => t.includes('無法啟動'))).toBe(true)
   // It tried: the detached start, then the wait for the relay
   expect(seen.runs[0]?.[0]).toBe('powershell.exe')

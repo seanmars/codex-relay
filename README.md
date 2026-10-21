@@ -1,6 +1,6 @@
 # codex-relay
 
-讓 Claude Code 的每個視窗各自選擇走 **Claude** 或 **OpenAI Codex**. Codex 使用 Codex CLI 的 ChatGPT 登入, statusline 會顯示這個 session 的 Codex model, token 用量和方案剩餘額度.
+讓 Claude Code 的每個視窗各自選擇走 **Claude** 或 **OpenAI Codex**. Codex 使用 Codex CLI 的 ChatGPT 登入, statusline 會顯示這個 session 的 Codex model, context 使用率和方案用量.
 
 ```text
 Claude Code ── ANTHROPIC_BASE_URL ──▶ relay (Node, 127.0.0.1:8960)
@@ -59,7 +59,7 @@ Plugin 會在 session 開始時啟動 relay, 並只對**這個 session** 設定 
 
 **Subagent**: `codex-relay:codex` agent type 會在 Codex 上執行 (model 由 `agentModel` 指定). 主對話可以留在 Claude.
 
-**Statusline 範例**: `Codex gpt-5.6-terra · 12.3k in / 678 out · 5h 23% · 週 41%`
+**Statusline 範例**: `⚠ codex-relay: ⇄ Codex gpt-5.6-terra · ctx 42% · 5h 23% · 週 41%`. `⚠ codex-relay:` 是 Claude Code 加上的前綴. `ctx` 是這個 session 的 context window 使用率.
 
 ## 設定
 
