@@ -134,44 +134,58 @@ fn parse_alias(raw: &str) -> Option<AliasProvider> {
 
 /// The `config.json` the settings come from: the config dir's own, else the
 /// one left in the dir used before the platform fix (`paths::pre_fix_config_file`).
-fn config_file_to_read(config_dir: &Path) -> PathBuf {
+fn config_file_to_read(config_dir: &Path, deps: &paths::DirResolverEnv) -> PathBuf {
     let path = config_dir.join("config.json");
     if path.exists() {
         return path;
     }
-    paths::pre_fix_config_file(config_dir, &paths::DirResolverEnv::default())
+    paths::pre_fix_config_file(config_dir, deps)
         .filter(|old| old.exists())
         .unwrap_or(path)
 }
 
 fn read_file_config(config_dir: &Path) -> Option<FileConfig> {
-    let raw = fs::read_to_string(config_file_to_read(config_dir)).ok()?;
+    read_file_config_with(config_dir, &paths::DirResolverEnv::default())
+}
+
+fn read_file_config_with(config_dir: &Path, deps: &paths::DirResolverEnv) -> Option<FileConfig> {
+    let raw = fs::read_to_string(config_file_to_read(config_dir, deps)).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
-pub fn load_config() -> LoadedConfig {
-    let env = paths::DirResolverEnv::default();
-    let config_dir = paths::resolve_config_dir(&env);
-    load_config_from_env(&env.env, config_dir)
-}
-
-pub fn load_config_for_env(env: &HashMap<String, String>) -> LoadedConfig {
+/// Resolves dirs from `env` alone, so a test can hand in the env it wants
+/// instead of changing the process env that tests running in parallel read
+fn resolver_env(env: &HashMap<String, String>) -> paths::DirResolverEnv {
     let home = env
         .get("HOME")
         .or_else(|| env.get("USERPROFILE"))
         .cloned()
         .unwrap_or_else(|| "/".to_string());
-    let resolver_env = paths::DirResolverEnv {
+    paths::DirResolverEnv {
         platform: std::env::consts::OS.to_string(),
         env: env.clone(),
         home,
-    };
-    let config_dir = paths::resolve_config_dir(&resolver_env);
-    load_config_from_env(env, config_dir)
+    }
 }
 
-fn load_config_from_env(env: &HashMap<String, String>, config_dir: PathBuf) -> LoadedConfig {
-    let file = read_file_config(&config_dir);
+/// The `config.json` of the config dir `env` resolves to
+fn file_config_for_env(env: &HashMap<String, String>) -> Option<FileConfig> {
+    let deps = resolver_env(env);
+    read_file_config_with(&paths::resolve_config_dir(&deps), &deps)
+}
+
+pub fn load_config() -> LoadedConfig {
+    load_config_from_env(&paths::DirResolverEnv::default())
+}
+
+pub fn load_config_for_env(env: &HashMap<String, String>) -> LoadedConfig {
+    load_config_from_env(&resolver_env(env))
+}
+
+fn load_config_from_env(deps: &paths::DirResolverEnv) -> LoadedConfig {
+    let env = &deps.env;
+    let config_dir = paths::resolve_config_dir(deps);
+    let file = read_file_config_with(&config_dir, deps);
 
     let mut out = LoadedConfig {
         bind_address: "127.0.0.1".to_string(),
@@ -712,7 +726,10 @@ pub fn codex_previous_response_id() -> bool {
 }
 
 pub fn codex_server_compaction() -> bool {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    codex_server_compaction_for_env(&std::env::vars().collect())
+}
+
+fn codex_server_compaction_for_env(env: &HashMap<String, String>) -> bool {
     if let Some(raw) = env.get("CCP_CODEX_SERVER_COMPACTION") {
         match raw.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => return true,
@@ -720,8 +737,7 @@ pub fn codex_server_compaction() -> bool {
             _ => {}
         }
     }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
+    if let Some(file) = file_config_for_env(env)
         && let Some(codex) = file.codex
         && let Some(enabled) = codex.server_compaction
     {
@@ -731,12 +747,14 @@ pub fn codex_server_compaction() -> bool {
 }
 
 pub fn codex_responses_api() -> bool {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    codex_responses_api_for_env(&std::env::vars().collect())
+}
+
+fn codex_responses_api_for_env(env: &HashMap<String, String>) -> bool {
     if let Some(raw) = env.get("CCP_CODEX_RESPONSES_API") {
         return matches!(raw.to_ascii_lowercase().as_str(), "1" | "true" | "yes");
     }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
+    if let Some(file) = file_config_for_env(env)
         && let Some(codex) = file.codex
         && let Some(enabled) = codex.responses_api
     {
@@ -746,12 +764,14 @@ pub fn codex_responses_api() -> bool {
 }
 
 pub fn codex_images_api() -> bool {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    codex_images_api_for_env(&std::env::vars().collect())
+}
+
+fn codex_images_api_for_env(env: &HashMap<String, String>) -> bool {
     if let Some(raw) = env.get("CCP_CODEX_IMAGES_API") {
         return matches!(raw.to_ascii_lowercase().as_str(), "1" | "true" | "yes");
     }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
+    if let Some(file) = file_config_for_env(env)
         && let Some(codex) = file.codex
         && let Some(enabled) = codex.images_api
     {
@@ -761,12 +781,14 @@ pub fn codex_images_api() -> bool {
 }
 
 pub fn codex_transcriptions_api() -> bool {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    codex_transcriptions_api_for_env(&std::env::vars().collect())
+}
+
+fn codex_transcriptions_api_for_env(env: &HashMap<String, String>) -> bool {
     if let Some(raw) = env.get("CCP_CODEX_TRANSCRIPTIONS_API") {
         return matches!(raw.to_ascii_lowercase().as_str(), "1" | "true" | "yes");
     }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
+    if let Some(file) = file_config_for_env(env)
         && let Some(codex) = file.codex
         && let Some(enabled) = codex.transcriptions_api
     {
@@ -776,12 +798,14 @@ pub fn codex_transcriptions_api() -> bool {
 }
 
 pub fn codex_images_base_url() -> String {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    codex_images_base_url_for_env(&std::env::vars().collect())
+}
+
+fn codex_images_base_url_for_env(env: &HashMap<String, String>) -> String {
     if let Some(raw) = env.get("CCP_CODEX_IMAGES_BASE_URL") {
         return raw.clone();
     }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
+    if let Some(file) = file_config_for_env(env)
         && let Some(codex) = file.codex
         && let Some(url) = codex.images_base_url
     {
@@ -819,15 +843,17 @@ pub fn codex_effort() -> Option<String> {
 }
 
 pub fn codex_reasoning_summary() -> Option<String> {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    codex_reasoning_summary_for_env(&std::env::vars().collect())
+}
+
+fn codex_reasoning_summary_for_env(env: &HashMap<String, String>) -> Option<String> {
     if let Some(raw) = env
         .get("CCP_CODEX_REASONING_SUMMARY")
         .filter(|raw| !raw.is_empty())
     {
         return Some(raw.clone());
     }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
+    if let Some(file) = file_config_for_env(env)
         && let Some(codex) = file.codex
         && let Some(summary) = codex.reasoning_summary.filter(|raw| !raw.is_empty())
     {
@@ -851,14 +877,17 @@ pub fn codex_model() -> Option<String> {
 }
 
 pub fn auto_review_model() -> Option<String> {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    auto_review_model_for_env(&std::env::vars().collect())
+}
+
+fn auto_review_model_for_env(env: &HashMap<String, String>) -> Option<String> {
     if let Some(raw) = env
         .get("CCP_AUTO_REVIEW_MODEL")
         .filter(|raw| !raw.is_empty())
     {
         return Some(raw.clone());
     }
-    read_file_config(&paths::config_dir())
+    file_config_for_env(env)
         .and_then(|file| file.auto_review_model)
         .filter(|model| !model.is_empty())
 }
@@ -894,14 +923,16 @@ fn parse_codex_transport(raw: &str) -> Option<CodexTransport> {
 }
 
 pub fn codex_transport() -> CodexTransport {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    codex_transport_for_env(&std::env::vars().collect())
+}
+
+fn codex_transport_for_env(env: &HashMap<String, String>) -> CodexTransport {
     if let Some(raw) = env.get("CCP_CODEX_TRANSPORT")
         && let Some(transport) = parse_codex_transport(raw)
     {
         return transport;
     }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
+    if let Some(file) = file_config_for_env(env)
         && let Some(codex) = file.codex
         && let Some(transport) = codex.transport.as_deref().and_then(parse_codex_transport)
     {
@@ -924,7 +955,10 @@ pub const CODEX_DEFAULT_HEADER_TIMEOUT_MS: u64 = 300_000;
 pub const CODEX_MIN_HEADER_TIMEOUT_MS: u64 = 1_000;
 
 pub fn codex_header_timeout_ms() -> u64 {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    codex_header_timeout_ms_for_env(&std::env::vars().collect())
+}
+
+fn codex_header_timeout_ms_for_env(env: &HashMap<String, String>) -> u64 {
     if let Some(ms) = env
         .get("CCP_CODEX_HEADER_TIMEOUT_MS")
         .and_then(|raw| raw.trim().parse::<u64>().ok())
@@ -932,8 +966,7 @@ pub fn codex_header_timeout_ms() -> u64 {
     {
         return ms;
     }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
+    if let Some(file) = file_config_for_env(env)
         && let Some(codex) = file.codex
         && let Some(ms) = codex
             .header_timeout_ms
@@ -976,14 +1009,16 @@ pub fn parse_codex_auth_source_arg(raw: &str) -> Result<CodexAuthSource, String>
 }
 
 pub fn codex_auth_source() -> CodexAuthSource {
-    let env: HashMap<_, _> = std::env::vars().collect();
+    codex_auth_source_for_env(&std::env::vars().collect())
+}
+
+fn codex_auth_source_for_env(env: &HashMap<String, String>) -> CodexAuthSource {
     if let Some(raw) = env.get("CCP_CODEX_AUTH_SOURCE")
         && let Some(source) = parse_codex_auth_source(raw)
     {
         return source;
     }
-    let config_dir = paths::config_dir();
-    if let Some(file) = read_file_config(&config_dir)
+    if let Some(file) = file_config_for_env(env)
         && let Some(codex) = file.codex
         && let Some(source) = codex
             .auth_source
@@ -999,8 +1034,17 @@ pub fn codex_auth_source() -> CodexAuthSource {
 /// A `config.json` that is not a JSON object is refused, not replaced. The
 /// keys of a `config.json` still in the pre-fix dir move along to the config dir.
 pub fn save_codex_auth_source(source: CodexAuthSource) -> anyhow::Result<PathBuf> {
-    let path = config_path();
-    let source_path = config_file_to_read(&paths::config_dir());
+    save_codex_auth_source_for_env(source, &std::env::vars().collect())
+}
+
+fn save_codex_auth_source_for_env(
+    source: CodexAuthSource,
+    env: &HashMap<String, String>,
+) -> anyhow::Result<PathBuf> {
+    let deps = resolver_env(env);
+    let config_dir = paths::resolve_config_dir(&deps);
+    let path = config_dir.join("config.json");
+    let source_path = config_file_to_read(&config_dir, &deps);
     let mut root = match fs::read_to_string(&source_path) {
         Ok(raw) => serde_json::from_str::<serde_json::Value>(&raw)
             .map_err(|err| anyhow::anyhow!("{} is not valid JSON: {err}", source_path.display()))?,
@@ -1096,38 +1140,9 @@ pub fn cursor_agent_bundle() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use once_cell::sync::Lazy;
-    use std::sync::Mutex;
 
-    static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-    /// Clears the environment knobs the config accessors read and points the
-    /// config dir at `config`, so neither the developer's shell nor their real
-    /// config.json can leak into the test. Every change is restored when the
-    /// guards drop, including `CCP_CONFIG_DIR`: a plain `remove_var` here would
-    /// strip a `CCP_CONFIG_DIR` the developer exported to isolate the whole
-    /// run, and every later test in the process that reads config through
-    /// `paths::config_dir()` would fall back to the real config file.
-    fn isolated_env(config: &tempfile::TempDir) -> Vec<EnvGuard> {
-        let mut guards = vec![
-            EnvGuard::unset("CCP_BIND_ADDRESS"),
-            EnvGuard::unset("CCP_CODEX_TRANSPORT"),
-            EnvGuard::unset("CCP_LOG_VERBOSE"),
-            EnvGuard::unset("CCP_LOG_STDERR"),
-            EnvGuard::unset("CCP_CODEX_REASONING_SUMMARY"),
-            EnvGuard::unset("CCP_CODEX_SERVER_COMPACTION"),
-            EnvGuard::unset("CCP_CODEX_RESPONSES_API"),
-            EnvGuard::unset("CCP_CODEX_IMAGES_API"),
-            EnvGuard::unset("CCP_CODEX_IMAGES_BASE_URL"),
-            EnvGuard::unset("CCP_CODEX_TRANSCRIPTIONS_API"),
-            EnvGuard::unset("CCP_CODEX_HEADER_TIMEOUT_MS"),
-            EnvGuard::unset("CCP_CODEX_AUTH_SOURCE"),
-            EnvGuard::unset("CCP_AUTO_REVIEW_MODEL"),
-        ];
-        guards.push(EnvGuard::set("CCP_CONFIG_DIR", config.path()));
-        guards
-    }
-
+    // Tests hand the `_for_env` accessors an env of their own and never touch
+    // the process env: other tests read config through it while these run
     fn config_env(config: &tempfile::TempDir) -> HashMap<String, String> {
         HashMap::from([(
             "CCP_CONFIG_DIR".to_string(),
@@ -1140,21 +1155,23 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_reads_and_moves_a_config_left_in_the_pre_fix_dir() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let config = tempfile::TempDir::new().unwrap();
         let root = tempfile::TempDir::new().unwrap();
-        // Locals drop in reverse: these come back before isolated_env's own
-        let _env = isolated_env(&config);
-        let _no_dir = EnvGuard::unset("CCP_CONFIG_DIR");
-        let _no_xdg = EnvGuard::unset("XDG_CONFIG_HOME");
-        let _home = EnvGuard::set("HOME", root.path());
-        let _appdata = EnvGuard::set("APPDATA", root.path().join("AppData"));
+        let env = HashMap::from([
+            (
+                "HOME".to_string(),
+                root.path().to_string_lossy().into_owned(),
+            ),
+            (
+                "APPDATA".to_string(),
+                root.path().join("AppData").to_string_lossy().into_owned(),
+            ),
+        ]);
         let old_dir = root.path().join(".config").join("claude-code-proxy");
         std::fs::create_dir_all(&old_dir).unwrap();
         std::fs::write(old_dir.join("config.json"), r#"{"port":19001}"#).unwrap();
 
-        assert_eq!(port(), 19001);
-        let saved = save_codex_auth_source(CodexAuthSource::Proxy).unwrap();
+        assert_eq!(load_config_for_env(&env).port, 19001);
+        let saved = save_codex_auth_source_for_env(CodexAuthSource::Proxy, &env).unwrap();
         assert_eq!(
             saved,
             root.path()
@@ -1169,7 +1186,7 @@ mod tests {
 
         // From now on the config dir's own file is the one read
         std::fs::write(old_dir.join("config.json"), r#"{"port":19002}"#).unwrap();
-        assert_eq!(port(), 19001);
+        assert_eq!(load_config_for_env(&env).port, 19001);
     }
 
     #[test]
@@ -1225,176 +1242,113 @@ mod tests {
         assert_eq!(load_config_for_env(&env).bind_address, "0.0.0.0");
     }
 
-    struct EnvGuard {
-        key: &'static str,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-            let previous = std::env::var_os(key);
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, previous }
-        }
-
-        fn unset(key: &'static str) -> Self {
-            let previous = std::env::var_os(key);
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, previous }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match self.previous.take() {
-                    Some(value) => std::env::set_var(self.key, value),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn isolated_env_restores_an_exported_config_dir() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let exported = tempfile::TempDir::new().unwrap();
-        let _exported_env = EnvGuard::set("CCP_CONFIG_DIR", exported.path());
-        {
-            let config = tempfile::TempDir::new().unwrap();
-            let _env = isolated_env(&config);
-            assert_eq!(paths::config_dir(), config.path());
-        }
-        assert_eq!(paths::config_dir(), exported.path());
-    }
-
     #[test]
     fn codex_transport_defaults_to_websocket() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
-        let result = codex_transport();
-        assert_eq!(result, CodexTransport::WebSocket);
+        let env = config_env(&config);
+        assert_eq!(codex_transport_for_env(&env), CodexTransport::WebSocket);
     }
 
     #[test]
     fn codex_transport_reads_env() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
-        unsafe {
-            std::env::set_var("CCP_CODEX_TRANSPORT", "auto");
-        }
-        assert_eq!(codex_transport(), CodexTransport::Auto);
+        let mut env = config_env(&config);
+        env.insert("CCP_CODEX_TRANSPORT".to_string(), "auto".to_string());
+        assert_eq!(codex_transport_for_env(&env), CodexTransport::Auto);
     }
 
     #[test]
     fn codex_transport_env_websocket() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
-        unsafe {
-            std::env::set_var("CCP_CODEX_TRANSPORT", "websocket");
-        }
-        assert_eq!(codex_transport(), CodexTransport::WebSocket);
+        let mut env = config_env(&config);
+        env.insert("CCP_CODEX_TRANSPORT".to_string(), "websocket".to_string());
+        assert_eq!(codex_transport_for_env(&env), CodexTransport::WebSocket);
     }
 
     #[test]
     fn codex_transport_invalid_env_falls_back_to_websocket() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
-        unsafe {
-            std::env::set_var("CCP_CODEX_TRANSPORT", "invalid");
-        }
-        assert_eq!(codex_transport(), CodexTransport::WebSocket);
+        let mut env = config_env(&config);
+        env.insert("CCP_CODEX_TRANSPORT".to_string(), "invalid".to_string());
+        assert_eq!(codex_transport_for_env(&env), CodexTransport::WebSocket);
     }
 
     #[test]
     fn codex_transport_empty_env_falls_back_to_websocket() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
-        unsafe {
-            std::env::set_var("CCP_CODEX_TRANSPORT", "");
-        }
-        assert_eq!(codex_transport(), CodexTransport::WebSocket);
+        let mut env = config_env(&config);
+        env.insert("CCP_CODEX_TRANSPORT".to_string(), String::new());
+        assert_eq!(codex_transport_for_env(&env), CodexTransport::WebSocket);
     }
 
     #[test]
     fn codex_auth_source_defaults_reads_file_and_env_precedence() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
+        let mut env = config_env(&config);
 
-        assert_eq!(codex_auth_source(), CodexAuthSource::CodexCli);
+        assert_eq!(codex_auth_source_for_env(&env), CodexAuthSource::CodexCli);
         std::fs::write(
             config.path().join("config.json"),
             r#"{"codex":{"authSource":"proxy"}}"#,
         )
         .unwrap();
-        assert_eq!(codex_auth_source(), CodexAuthSource::Proxy);
-        {
-            let _source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "codex-cli");
-            assert_eq!(codex_auth_source(), CodexAuthSource::CodexCli);
-        }
-        {
-            let _source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "invalid");
-            assert_eq!(codex_auth_source(), CodexAuthSource::Proxy);
-        }
+        assert_eq!(codex_auth_source_for_env(&env), CodexAuthSource::Proxy);
+        env.insert("CCP_CODEX_AUTH_SOURCE".to_string(), "codex-cli".to_string());
+        assert_eq!(codex_auth_source_for_env(&env), CodexAuthSource::CodexCli);
+        env.insert("CCP_CODEX_AUTH_SOURCE".to_string(), "invalid".to_string());
+        assert_eq!(codex_auth_source_for_env(&env), CodexAuthSource::Proxy);
         assert_eq!(CodexAuthSource::CodexCli.as_str(), "codex-cli");
     }
 
     #[test]
     fn save_codex_auth_source_keeps_other_keys() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
+        let env = config_env(&config);
         let path = config.path().join("config.json");
 
         assert_eq!(
-            save_codex_auth_source(CodexAuthSource::CodexCli).unwrap(),
+            save_codex_auth_source_for_env(CodexAuthSource::CodexCli, &env).unwrap(),
             path
         );
-        assert_eq!(codex_auth_source(), CodexAuthSource::CodexCli);
+        assert_eq!(codex_auth_source_for_env(&env), CodexAuthSource::CodexCli);
 
         std::fs::write(&path, r#"{"port":19000,"codex":{"model":"gpt-6"}}"#).unwrap();
-        save_codex_auth_source(CodexAuthSource::CodexCli).unwrap();
+        save_codex_auth_source_for_env(CodexAuthSource::CodexCli, &env).unwrap();
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved["port"], 19000);
         assert_eq!(saved["codex"]["model"], "gpt-6");
         assert_eq!(saved["codex"]["authSource"], "codex-cli");
 
-        save_codex_auth_source(CodexAuthSource::Proxy).unwrap();
-        assert_eq!(codex_auth_source(), CodexAuthSource::Proxy);
+        save_codex_auth_source_for_env(CodexAuthSource::Proxy, &env).unwrap();
+        assert_eq!(codex_auth_source_for_env(&env), CodexAuthSource::Proxy);
 
         std::fs::write(&path, "not json").unwrap();
-        assert!(save_codex_auth_source(CodexAuthSource::CodexCli).is_err());
+        assert!(save_codex_auth_source_for_env(CodexAuthSource::CodexCli, &env).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "not json");
     }
 
     #[test]
     fn codex_header_timeout_defaults_overrides_and_floors() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
+        let mut env = config_env(&config);
 
-        assert_eq!(codex_header_timeout_ms(), CODEX_DEFAULT_HEADER_TIMEOUT_MS);
+        assert_eq!(
+            codex_header_timeout_ms_for_env(&env),
+            CODEX_DEFAULT_HEADER_TIMEOUT_MS
+        );
         std::fs::write(
             config.path().join("config.json"),
             r#"{"codex":{"headerTimeoutMs":600000}}"#,
         )
         .unwrap();
-        assert_eq!(codex_header_timeout_ms(), 600_000);
-        {
-            let _timeout_env = EnvGuard::set("CCP_CODEX_HEADER_TIMEOUT_MS", "120000");
-            assert_eq!(codex_header_timeout_ms(), 120_000);
-        }
+        assert_eq!(codex_header_timeout_ms_for_env(&env), 600_000);
+        env.insert(
+            "CCP_CODEX_HEADER_TIMEOUT_MS".to_string(),
+            "120000".to_string(),
+        );
+        assert_eq!(codex_header_timeout_ms_for_env(&env), 120_000);
+        env.remove("CCP_CODEX_HEADER_TIMEOUT_MS");
         // Below the floor is ignored, not clamped: a value that small is a typo,
         // and clamping it would hide the typo behind a working default.
         std::fs::write(
@@ -1402,9 +1356,15 @@ mod tests {
             r#"{"codex":{"headerTimeoutMs":5}}"#,
         )
         .unwrap();
-        assert_eq!(codex_header_timeout_ms(), CODEX_DEFAULT_HEADER_TIMEOUT_MS);
-        let _timeout_env = EnvGuard::set("CCP_CODEX_HEADER_TIMEOUT_MS", "0");
-        assert_eq!(codex_header_timeout_ms(), CODEX_DEFAULT_HEADER_TIMEOUT_MS);
+        assert_eq!(
+            codex_header_timeout_ms_for_env(&env),
+            CODEX_DEFAULT_HEADER_TIMEOUT_MS
+        );
+        env.insert("CCP_CODEX_HEADER_TIMEOUT_MS".to_string(), "0".to_string());
+        assert_eq!(
+            codex_header_timeout_ms_for_env(&env),
+            CODEX_DEFAULT_HEADER_TIMEOUT_MS
+        );
     }
 
     #[test]
@@ -1456,159 +1416,166 @@ mod tests {
 
     #[test]
     fn codex_responses_api_defaults_to_disabled() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
+        let env = config_env(&config);
 
-        assert!(!codex_responses_api());
+        assert!(!codex_responses_api_for_env(&env));
     }
 
     #[test]
     fn codex_responses_api_reads_config_and_env_takes_precedence() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
         std::fs::write(
             config.path().join("config.json"),
             r#"{"codex":{"responsesApi":true}}"#,
         )
         .unwrap();
-        let _env = isolated_env(&config);
+        let mut env = config_env(&config);
 
-        assert!(codex_responses_api());
-        let _responses_env = EnvGuard::set("CCP_CODEX_RESPONSES_API", "false");
-        assert!(!codex_responses_api());
+        assert!(codex_responses_api_for_env(&env));
+        env.insert("CCP_CODEX_RESPONSES_API".to_string(), "false".to_string());
+        assert!(!codex_responses_api_for_env(&env));
     }
 
     #[test]
     fn codex_responses_api_accepts_enabled_env_values() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
+        let mut env = config_env(&config);
 
         for value in ["1", "true", "TRUE", "yes"] {
-            let _responses_env = EnvGuard::set("CCP_CODEX_RESPONSES_API", value);
-            assert!(codex_responses_api(), "{value}");
+            env.insert("CCP_CODEX_RESPONSES_API".to_string(), value.to_string());
+            assert!(codex_responses_api_for_env(&env), "{value}");
         }
     }
 
     #[test]
     fn codex_images_api_defaults_to_disabled_and_env_overrides_config() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
         std::fs::write(
             config.path().join("config.json"),
             r#"{"codex":{"imagesApi":true,"imagesBaseUrl":"https://chatgpt.com/backend-api/codex-custom"}}"#,
         )
         .unwrap();
-        let _env = isolated_env(&config);
+        let mut env = config_env(&config);
 
-        assert!(codex_images_api());
+        assert!(codex_images_api_for_env(&env));
         assert_eq!(
-            codex_images_base_url(),
+            codex_images_base_url_for_env(&env),
             "https://chatgpt.com/backend-api/codex-custom"
         );
-        let _enabled_env = EnvGuard::set("CCP_CODEX_IMAGES_API", "false");
-        let _base_env = EnvGuard::set(
-            "CCP_CODEX_IMAGES_BASE_URL",
-            "https://chatgpt.com/backend-api/codex",
+        env.insert("CCP_CODEX_IMAGES_API".to_string(), "false".to_string());
+        env.insert(
+            "CCP_CODEX_IMAGES_BASE_URL".to_string(),
+            "https://chatgpt.com/backend-api/codex".to_string(),
         );
-        assert!(!codex_images_api());
+        assert!(!codex_images_api_for_env(&env));
         assert_eq!(
-            codex_images_base_url(),
+            codex_images_base_url_for_env(&env),
             "https://chatgpt.com/backend-api/codex"
         );
     }
 
     #[test]
     fn codex_transcriptions_api_defaults_to_disabled_and_env_overrides_config() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
         std::fs::write(
             config.path().join("config.json"),
             r#"{"codex":{"transcriptionsApi":true}}"#,
         )
         .unwrap();
-        let _env = isolated_env(&config);
+        let mut env = config_env(&config);
 
-        assert!(codex_transcriptions_api());
-        let _enabled_env = EnvGuard::set("CCP_CODEX_TRANSCRIPTIONS_API", "false");
-        assert!(!codex_transcriptions_api());
+        assert!(codex_transcriptions_api_for_env(&env));
+        env.insert(
+            "CCP_CODEX_TRANSCRIPTIONS_API".to_string(),
+            "false".to_string(),
+        );
+        assert!(!codex_transcriptions_api_for_env(&env));
     }
 
     #[test]
     fn codex_reasoning_summary_reads_config() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
         std::fs::write(
             config.path().join("config.json"),
             r#"{"codex":{"reasoningSummary":"off"}}"#,
         )
         .unwrap();
-        let _env = isolated_env(&config);
+        let env = config_env(&config);
 
-        assert_eq!(codex_reasoning_summary().as_deref(), Some("off"));
+        assert_eq!(
+            codex_reasoning_summary_for_env(&env).as_deref(),
+            Some("off")
+        );
     }
 
     #[test]
     fn codex_reasoning_summary_env_overrides_config_and_empty_falls_through() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
         std::fs::write(
             config.path().join("config.json"),
             r#"{"codex":{"reasoningSummary":"off"}}"#,
         )
         .unwrap();
-        let _env = isolated_env(&config);
-        {
-            let _summary_env = EnvGuard::set("CCP_CODEX_REASONING_SUMMARY", "auto");
-            assert_eq!(codex_reasoning_summary().as_deref(), Some("auto"));
-        }
-        {
-            let _summary_env = EnvGuard::set("CCP_CODEX_REASONING_SUMMARY", "");
-            assert_eq!(codex_reasoning_summary().as_deref(), Some("off"));
-        }
+        let mut env = config_env(&config);
+
+        env.insert(
+            "CCP_CODEX_REASONING_SUMMARY".to_string(),
+            "auto".to_string(),
+        );
+        assert_eq!(
+            codex_reasoning_summary_for_env(&env).as_deref(),
+            Some("auto")
+        );
+        env.insert("CCP_CODEX_REASONING_SUMMARY".to_string(), String::new());
+        assert_eq!(
+            codex_reasoning_summary_for_env(&env).as_deref(),
+            Some("off")
+        );
     }
 
     #[test]
     fn auto_review_model_reads_top_level_config_and_env_takes_precedence() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
         std::fs::write(
             config.path().join("config.json"),
             r#"{"autoReviewModel":"grok-4.5"}"#,
         )
         .unwrap();
-        let _env = isolated_env(&config);
+        let mut env = config_env(&config);
 
-        assert_eq!(auto_review_model().as_deref(), Some("grok-4.5"));
-        {
-            let _model_env = EnvGuard::set("CCP_AUTO_REVIEW_MODEL", "gpt-5.6-terra");
-            assert_eq!(auto_review_model().as_deref(), Some("gpt-5.6-terra"));
-        }
-        {
-            let _model_env = EnvGuard::set("CCP_AUTO_REVIEW_MODEL", "");
-            assert_eq!(auto_review_model().as_deref(), Some("grok-4.5"));
-        }
+        assert_eq!(auto_review_model_for_env(&env).as_deref(), Some("grok-4.5"));
+        env.insert(
+            "CCP_AUTO_REVIEW_MODEL".to_string(),
+            "gpt-5.6-terra".to_string(),
+        );
+        assert_eq!(
+            auto_review_model_for_env(&env).as_deref(),
+            Some("gpt-5.6-terra")
+        );
+        env.insert("CCP_AUTO_REVIEW_MODEL".to_string(), String::new());
+        assert_eq!(auto_review_model_for_env(&env).as_deref(), Some("grok-4.5"));
     }
 
     #[test]
     fn codex_server_compaction_defaults_and_overrides() {
-        let _guard = ENV_LOCK.lock().unwrap();
         let config = tempfile::TempDir::new().unwrap();
-        let _env = isolated_env(&config);
+        let mut env = config_env(&config);
 
-        assert!(!codex_server_compaction());
-        {
-            let _enabled_env = EnvGuard::set("CCP_CODEX_SERVER_COMPACTION", "on");
-            assert!(codex_server_compaction());
-        }
+        assert!(!codex_server_compaction_for_env(&env));
+        env.insert("CCP_CODEX_SERVER_COMPACTION".to_string(), "on".to_string());
+        assert!(codex_server_compaction_for_env(&env));
+        env.remove("CCP_CODEX_SERVER_COMPACTION");
         std::fs::write(
             config.path().join("config.json"),
             r#"{"codex":{"serverCompaction":true}}"#,
         )
         .unwrap();
-        assert!(codex_server_compaction());
-        let _disabled_env = EnvGuard::set("CCP_CODEX_SERVER_COMPACTION", "false");
-        assert!(!codex_server_compaction());
+        assert!(codex_server_compaction_for_env(&env));
+        env.insert(
+            "CCP_CODEX_SERVER_COMPACTION".to_string(),
+            "false".to_string(),
+        );
+        assert!(!codex_server_compaction_for_env(&env));
     }
 }
