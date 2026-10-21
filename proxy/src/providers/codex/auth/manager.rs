@@ -53,7 +53,7 @@ impl<S: AuthStorage<StoredAuth>> CodexAuthManager<S> {
     }
 
     pub async fn get_auth(&self) -> Result<StoredAuth, anyhow::Error> {
-        let stored = self.load_auth()?.ok_or_else(|| {
+        let stored = self.load_auth().await?.ok_or_else(|| {
             anyhow::anyhow!("Not authenticated. Run: claude-code-proxy codex auth login")
         })?;
 
@@ -68,7 +68,7 @@ impl<S: AuthStorage<StoredAuth>> CodexAuthManager<S> {
         self.refresh(true, Some(rejected_access)).await
     }
 
-    fn load_auth(&self) -> Result<Option<StoredAuth>, anyhow::Error> {
+    async fn load_auth(&self) -> Result<Option<StoredAuth>, anyhow::Error> {
         #[cfg(test)]
         if let Some(auth) = self
             .test_auth
@@ -79,7 +79,7 @@ impl<S: AuthStorage<StoredAuth>> CodexAuthManager<S> {
             return Ok(Some(auth));
         }
 
-        self.store.load_auth()
+        self.store.load_auth_async().await
     }
 
     async fn refresh(
@@ -93,7 +93,8 @@ impl<S: AuthStorage<StoredAuth>> CodexAuthManager<S> {
         // Another request may have rotated and persisted the token while this
         // caller was waiting.
         let current = self
-            .load_auth()?
+            .load_auth()
+            .await?
             .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
 
         if (!force && current.expires > Self::now_ms() + REFRESH_MARGIN_MS)
@@ -126,12 +127,12 @@ impl<S: AuthStorage<StoredAuth>> CodexAuthManager<S> {
 
         let status = resp.status().as_u16();
         if status == 401 || status == 403 {
-            if let Some(latest) = self.store.load_auth()?
+            if let Some(latest) = self.store.load_auth_async().await?
                 && latest != *current
             {
                 return Ok(latest);
             }
-            self.store.clear_auth()?;
+            self.store.clear_auth_async().await?;
             let err_msg = resp
                 .text()
                 .await

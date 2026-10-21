@@ -4,10 +4,18 @@ use serde_json::to_string_pretty;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::marker::PhantomData;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::paths::set_mode;
 
-pub trait AuthStorage<T>: Send + Sync
+/// How long a Keychain read result is reused. Each read spawns
+/// `/usr/bin/security`, so a missing or failing entry must not cost one
+/// process per request.
+const KEYCHAIN_READ_CACHE_TTL: Duration = Duration::from_secs(30);
+
+// `'static` lets async callers move a shared store into `spawn_blocking`.
+pub trait AuthStorage<T>: Send + Sync + 'static
 where
     T: Serialize + DeserializeOwned + Send + Sync + Clone,
 {
@@ -141,7 +149,7 @@ where
 
 impl<T> AuthStorage<T> for FileAuthStore<T>
 where
-    T: Serialize + DeserializeOwned + Send + Sync + Clone,
+    T: Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
 {
     fn load(&self) -> Result<Option<T>> {
         let parsed = load_auth_file::<T>(&self.file);
@@ -190,7 +198,13 @@ where
     account: String,
     use_keychain: bool,
     keychain_path: String,
+    keychain_cache: Mutex<Option<CachedKeychainRead>>,
     _marker: PhantomData<T>,
+}
+
+struct CachedKeychainRead {
+    read_at: Instant,
+    result: Result<Option<String>, String>,
 }
 
 impl<T, K> KeychainFileAuthStore<T, K>
@@ -213,22 +227,52 @@ where
             account: account.into(),
             use_keychain,
             keychain_path: "macOS Keychain".to_string(),
+            keychain_cache: Mutex::new(None),
             _marker: PhantomData,
+        }
+    }
+
+    /// Reads the Keychain entry, reusing a recent result. The lock is held
+    /// during the read so concurrent callers share one `/usr/bin/security` run.
+    fn read_keychain_cached(&self) -> Result<Option<String>> {
+        let mut cache = self
+            .keychain_cache
+            .lock()
+            .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        if let Some(cached) = cache.as_ref()
+            && cached.read_at.elapsed() < KEYCHAIN_READ_CACHE_TTL
+        {
+            return cached.result.clone().map_err(|err| anyhow::anyhow!(err));
+        }
+        let result = self
+            .keychain
+            .read(&self.service, &self.account)
+            .map_err(|err| err.to_string());
+        *cache = Some(CachedKeychainRead {
+            read_at: Instant::now(),
+            result: result.clone(),
+        });
+        result.map_err(|err| anyhow::anyhow!(err))
+    }
+
+    fn reset_keychain_cache(&self) {
+        if let Ok(mut cache) = self.keychain_cache.lock() {
+            *cache = None;
         }
     }
 }
 
 impl<T, K> AuthStorage<T> for KeychainFileAuthStore<T, K>
 where
-    T: Serialize + DeserializeOwned + Send + Sync + Clone,
-    K: Keychain,
+    T: Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
+    K: Keychain + 'static,
 {
     fn load(&self) -> Result<Option<T>> {
         if let Some(parsed) = self.file_store.load()? {
             return Ok(Some(parsed));
         }
         if self.use_keychain
-            && let Some(raw) = self.keychain.read(&self.service, &self.account)?
+            && let Some(raw) = self.read_keychain_cached()?
         {
             return serde_json::from_str::<T>(&raw)
                 .map(Some)
@@ -239,6 +283,7 @@ where
 
     fn save(&self, value: T) -> Result<()> {
         if self.use_keychain {
+            self.reset_keychain_cache();
             let raw = serde_json::to_string(&value)?;
             if self
                 .keychain
@@ -254,6 +299,7 @@ where
 
     fn clear(&self) -> Result<()> {
         if self.use_keychain {
+            self.reset_keychain_cache();
             self.keychain.delete(&self.service, &self.account)?;
         }
         self.file_store.clear()
@@ -347,7 +393,7 @@ where
 
 impl<T> AuthStorage<T> for InMemoryAuthStore<T>
 where
-    T: Serialize + DeserializeOwned + Send + Sync + Clone,
+    T: Serialize + DeserializeOwned + Send + Sync + Clone + 'static,
 {
     fn load(&self) -> Result<Option<T>> {
         let inner = self
@@ -393,6 +439,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -453,6 +500,31 @@ mod tests {
 
         fn delete(&self, service: &str, account: &str) -> Result<()> {
             self.0.delete(service, account)
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct CountingKeychain {
+        inner: MockKeychain,
+        reads: Arc<AtomicUsize>,
+        fail_reads: bool,
+    }
+
+    impl Keychain for CountingKeychain {
+        fn read(&self, service: &str, account: &str) -> Result<Option<String>> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            if self.fail_reads {
+                anyhow::bail!("Keychain read failed: locked");
+            }
+            self.inner.read(service, account)
+        }
+
+        fn write(&self, _service: &str, _account: &str, _value: &str) -> Result<()> {
+            anyhow::bail!("read-only")
+        }
+
+        fn delete(&self, service: &str, account: &str) -> Result<()> {
+            self.inner.delete(service, account)
         }
     }
 
@@ -535,6 +607,58 @@ mod tests {
             store.load().unwrap().unwrap()["source"],
             json!("file-fallback")
         );
+        assert!(std::path::Path::new(&file).exists());
+    }
+
+    #[test]
+    fn keychain_file_store_reuses_recent_empty_keychain_read() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp_auth_path(&temp, "auth.json");
+        let legacy = temp_auth_path(&temp, "legacy.json");
+        let keychain = CountingKeychain::default();
+        let reads = keychain.reads.clone();
+        let store: KeychainFileAuthStore<serde_json::Value, _> =
+            KeychainFileAuthStore::new(file, legacy, "svc", "acct", true, keychain.clone());
+
+        assert!(store.load().unwrap().is_none());
+        // An entry added after the first read stays hidden until the cache resets.
+        keychain
+            .inner
+            .set_raw("svc", "acct", json!({"source": "keychain"}));
+        assert!(store.load().unwrap().is_none());
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        store.clear().unwrap();
+        keychain
+            .inner
+            .set_raw("svc", "acct", json!({"source": "keychain"}));
+        assert_eq!(store.load().unwrap().unwrap()["source"], json!("keychain"));
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn keychain_file_store_reuses_recent_failed_keychain_read() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp_auth_path(&temp, "auth.json");
+        let legacy = temp_auth_path(&temp, "legacy.json");
+        let keychain = CountingKeychain {
+            fail_reads: true,
+            ..Default::default()
+        };
+        let reads = keychain.reads.clone();
+        let store: KeychainFileAuthStore<serde_json::Value, _> =
+            KeychainFileAuthStore::new(file.clone(), legacy, "svc", "acct", true, keychain);
+
+        for _ in 0..3 {
+            let err = store.load().unwrap_err().to_string();
+            assert!(err.contains("locked"), "{err}");
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        // The saved file wins over the Keychain, so no new read happens.
+        store.save(json!({"source": "file"})).unwrap();
+        assert_eq!(store.load().unwrap().unwrap()["source"], json!("file"));
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
         assert!(std::path::Path::new(&file).exists());
     }
 

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use super::codex_cli_store::CodexCliAuthStore;
 use crate::auth::{AuthStorage, KeychainFileAuthStore, SystemKeychain};
@@ -23,16 +24,27 @@ pub struct StoredAuth {
 }
 
 pub struct CodexTokenStore<S: AuthStorage<StoredAuth>> {
-    store: S,
+    store: Arc<S>,
 }
 
 impl<S: AuthStorage<StoredAuth>> CodexTokenStore<S> {
     pub fn new(store: S) -> Self {
-        Self { store }
+        Self {
+            store: Arc::new(store),
+        }
     }
 
     pub fn load_auth(&self) -> Result<Option<StoredAuth>, anyhow::Error> {
         self.store.load()
+    }
+
+    /// Same as `load_auth`, but runs on the blocking pool. Use it from async
+    /// code: a macOS Keychain read waits on `/usr/bin/security` for up to 10s.
+    pub async fn load_auth_async(&self) -> Result<Option<StoredAuth>, anyhow::Error> {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || store.load())
+            .await
+            .map_err(|err| anyhow::anyhow!("auth load task failed: {err}"))?
     }
 
     pub fn save_auth(&self, value: StoredAuth) -> Result<(), anyhow::Error> {
@@ -41,6 +53,15 @@ impl<S: AuthStorage<StoredAuth>> CodexTokenStore<S> {
 
     pub fn clear_auth(&self) -> Result<(), anyhow::Error> {
         self.store.clear()
+    }
+
+    /// Same as `clear_auth`, but runs on the blocking pool. Use it from async
+    /// code: a macOS Keychain delete waits on `/usr/bin/security` for up to 10s.
+    pub async fn clear_auth_async(&self) -> Result<(), anyhow::Error> {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || store.clear())
+            .await
+            .map_err(|err| anyhow::anyhow!("auth clear task failed: {err}"))?
     }
 
     pub fn auth_path(&self) -> String {
@@ -158,5 +179,34 @@ mod tests {
         let loaded = store.load_auth().unwrap().unwrap();
         assert_eq!(loaded.access, "token");
         assert_eq!(loaded.account_id.as_deref(), Some("acct_1"));
+    }
+
+    #[tokio::test]
+    async fn load_auth_async_returns_stored_auth() {
+        let store = CodexTokenStore::new(InMemoryAuthStore::new());
+        assert_eq!(store.load_auth_async().await.unwrap(), None);
+        let auth = StoredAuth {
+            access: "token".into(),
+            refresh: "refresh".into(),
+            expires: 9999999999999,
+            account_id: None,
+        };
+        store.save_auth(auth.clone()).unwrap();
+        assert_eq!(store.load_auth_async().await.unwrap(), Some(auth));
+    }
+
+    #[tokio::test]
+    async fn clear_auth_async_removes_stored_auth() {
+        let store = CodexTokenStore::new(InMemoryAuthStore::new());
+        store
+            .save_auth(StoredAuth {
+                access: "token".into(),
+                refresh: "refresh".into(),
+                expires: 9999999999999,
+                account_id: None,
+            })
+            .unwrap();
+        store.clear_auth_async().await.unwrap();
+        assert_eq!(store.load_auth().unwrap(), None);
     }
 }
