@@ -12,6 +12,7 @@ use serde_json::{Map, Value, json};
 
 use crate::anthropic::sse::parse_sse_events;
 use crate::provider::RequestContext;
+use crate::registry::normalize_incoming_model;
 use crate::traffic::{
     MAX_SSE_CAPTURE_BYTES, MAX_STREAM_CAPTURE_EVENT_BYTES, MAX_STREAM_CAPTURE_EVENTS,
     MAX_STREAM_CAPTURE_FRAME_BYTES,
@@ -146,6 +147,9 @@ fn shape_native_request(body: &mut Value) -> Result<NativeResolved, Response> {
 }
 
 fn resolve_native_model(requested: &str) -> (String, Option<ServiceTier>) {
+    // The router matches the model without `[1m]`, so validation must too
+    let requested = normalize_incoming_model(requested);
+    let requested = requested.as_str();
     let (requested, service_tier) = match split_tier_suffix(requested) {
         Some((base, tier)) => (base, Some(tier)),
         None => (requested, None),
@@ -707,6 +711,14 @@ mod tests {
         let resolved = shape_native_request(&mut fast).unwrap();
         assert_eq!(resolved.model, "gpt-6-luna");
         assert_eq!(fast["service_tier"], "priority");
+    }
+
+    #[test]
+    fn native_request_strips_context_suffix() {
+        let mut body = request(json!({"model":"gpt-6-sol[1m]","input":[]}));
+        let resolved = shape_native_request(&mut body).unwrap();
+        assert_eq!(resolved.model, "gpt-6-sol");
+        assert_eq!(body["model"], "gpt-6-sol");
     }
 
     #[test]
