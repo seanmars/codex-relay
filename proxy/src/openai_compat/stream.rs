@@ -758,17 +758,19 @@ fn parse_frame(frame: &[u8]) -> Result<Option<SseEvent>, OpenAiError> {
     Ok(Some(SseEvent { event, data }))
 }
 
+// Take the first delimiter in the buffer, so a `\r\n\r\n` frame followed by a
+// `\n\n` frame is not merged into one
 fn find_event_delimiter(bytes: &[u8]) -> Option<(usize, usize)> {
-    bytes
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|position| (position, 2))
-        .or_else(|| {
-            bytes
-                .windows(4)
-                .position(|window| window == b"\r\n\r\n")
-                .map(|position| (position, 4))
-        })
+    (0..bytes.len()).find_map(|index| {
+        let rest = &bytes[index..];
+        if rest.starts_with(b"\r\n\r\n") {
+            Some((index, 4))
+        } else if rest.starts_with(b"\n\n") {
+            Some((index, 2))
+        } else {
+            None
+        }
+    })
 }
 
 fn current_seconds() -> u64 {
@@ -798,6 +800,18 @@ mod tests {
             .unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].event.as_deref(), Some("message_start"));
+        decoder.finish().unwrap();
+    }
+
+    #[test]
+    fn decoder_splits_crlf_frame_before_lf_frame() {
+        let mut decoder = SseDecoder::default();
+        let events = decoder
+            .push(b"event: ping\r\ndata: {\"type\":\"ping\"}\r\n\r\nevent: pong\ndata: {\"type\":\"pong\"}\n\n")
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event.as_deref(), Some("ping"));
+        assert_eq!(events[1].event.as_deref(), Some("pong"));
         decoder.finish().unwrap();
     }
 
