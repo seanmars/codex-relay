@@ -178,7 +178,13 @@ fn redact_with_depth(value: Value, depth: u8, verbose: bool) -> Value {
             if verbose {
                 Value::String(s)
             } else if s.len() > 4000 {
-                Value::String(format!("{}…[{} more]", &s[..4000], s.len() - 4000))
+                // Cut on a char boundary: a byte index inside a multi-byte
+                // char would make the slice panic
+                let mut end = 4000;
+                while !s.is_char_boundary(end) {
+                    end -= 1;
+                }
+                Value::String(format!("{}…[{} more]", &s[..end], s.len() - end))
             } else {
                 Value::String(s)
             }
@@ -221,6 +227,17 @@ mod tests {
     use std::sync::Mutex;
 
     static STDERR_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn long_multibyte_string_is_cut_on_a_char_boundary() {
+        // 3999 ASCII bytes put byte 4000 inside the 3-byte char
+        let s = format!("{}{}", "a".repeat(3999), "中".repeat(10));
+        let Value::String(out) = redact_with_depth(Value::String(s.clone()), 0, false) else {
+            panic!("expected a string");
+        };
+        assert!(out.starts_with(&s[..3999]));
+        assert!(out.ends_with(&format!("…[{} more]", s.len() - 3999)));
+    }
 
     #[test]
     fn stderr_suppression_disables_level_mirroring() {
