@@ -105,6 +105,7 @@ impl LiveStreamTranslator {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_incomplete_response_policy(
         mut self,
         policy: IncompleteResponsePolicy,

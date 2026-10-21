@@ -38,6 +38,7 @@ pub fn accumulate_response_with_traffic(
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn accumulate_response_with_policy(
     upstream: &[u8],
     message_id: &str,

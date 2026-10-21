@@ -10,6 +10,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[cfg(unix)]
 use tempfile::TempDir;
 
 #[test]
@@ -27,18 +28,15 @@ fn version_aliases_print_expected_version() -> Result<(), Box<dyn std::error::Er
 }
 
 #[test]
-fn models_prints_all_providers() -> Result<(), Box<dyn std::error::Error>> {
+fn models_prints_only_codex() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = Command::cargo_bin("claude-code-proxy")?;
     cmd.arg("models");
     let out = String::from_utf8(cmd.output()?.stdout)?;
-    assert!(out.contains("codex:"));
-    assert!(out.contains("kimi:"));
-    assert!(out.contains("opencode:"));
-    assert!(out.contains("cursor:"));
+    assert!(out.contains("codex:"), "{out}");
+    for removed in ["kimi:", "grok:", "opencode:", "cursor:"] {
+        assert!(!out.contains(removed), "{removed} in {out}");
+    }
 
-    let mut cmd = Command::cargo_bin("claude-code-proxy")?;
-    cmd.args(["models", "--full"]);
-    cmd.output()?;
     Ok(())
 }
 
@@ -55,11 +53,11 @@ fn help_describes_visible_commands_and_hides_demo() -> Result<(), Box<dyn std::e
         "Start the proxy server and monitor",
         "List supported provider models",
         "Manage Codex authentication",
-        "Manage Kimi authentication",
-        "Manage Cursor authentication",
-        "Manage Grok authentication",
     ] {
         assert!(stdout.contains(description), "missing: {description}");
+    }
+    for removed in ["Kimi", "Cursor", "Grok"] {
+        assert!(!stdout.contains(removed), "still listed: {removed}");
     }
     assert!(!stdout.contains("demo"));
     assert!(!stdout.contains("mock data and no proxy server"));
@@ -77,37 +75,14 @@ fn invalid_command_exits_two() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn unsupported_provider_auth_command_exits_two() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = Command::cargo_bin("claude-code-proxy")?;
-    cmd.args(["cursor", "auth", "device"]);
-    let output = cmd.output()?;
-    assert_eq!(output.status.code(), Some(2));
-    let out = String::from_utf8(output.stderr)?;
-    assert!(out.contains("not yet implemented") || out.contains("unsupported"));
-    Ok(())
-}
-
-#[test]
-fn provider_logout_without_auth_is_success() -> Result<(), Box<dyn std::error::Error>> {
-    let temp = TempDir::new()?;
-    let mut cmd = Command::cargo_bin("claude-code-proxy")?;
-    cmd.args(["kimi", "auth", "logout"]);
-    cmd.env("CCP_CONFIG_DIR", temp.path());
-    cmd.assert().success();
-    Ok(())
-}
-
-#[test]
-fn models_output_is_stable_order() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = Command::cargo_bin("claude-code-proxy")?;
-    cmd.args(["models", "--full"]);
-    let output = cmd.output()?;
-    let out = String::from_utf8(output.stdout)?;
-    let codex_pos = out.find("codex:").unwrap_or(0);
-    let kimi_pos = out.find("kimi:").unwrap_or(0);
-    let cursor_pos = out.find("cursor:").unwrap_or(0);
-    assert!(codex_pos < kimi_pos);
-    assert!(kimi_pos < cursor_pos);
+fn removed_provider_commands_exit_two() -> Result<(), Box<dyn std::error::Error>> {
+    for provider in ["kimi", "cursor", "grok"] {
+        Command::cargo_bin("claude-code-proxy")?
+            .args([provider, "auth", "status"])
+            .assert()
+            .failure()
+            .code(2);
+    }
     Ok(())
 }
 
@@ -239,20 +214,4 @@ fn plain_service_exits_on_second_ctrl_c() -> Result<(), Box<dyn std::error::Erro
 #[test]
 fn plain_service_exits_on_second_sigterm() -> Result<(), Box<dyn std::error::Error>> {
     plain_service_exits_on_second_signal("-TERM")
-}
-
-#[test]
-fn kimi_auth_status_reads_stored_auth() -> Result<(), Box<dyn std::error::Error>> {
-    let temp = TempDir::new()?;
-    let auth_dir = temp.path().join("kimi");
-    std::fs::create_dir_all(&auth_dir)?;
-    std::fs::write(
-        auth_dir.join("auth.json"),
-        r#"{"access":"a","refresh":"r","expires":4102444800000,"scope":"openid","userId":"u"}"#,
-    )?;
-    let mut cmd = Command::cargo_bin("claude-code-proxy")?;
-    cmd.args(["kimi", "auth", "status"]);
-    cmd.env("CCP_CONFIG_DIR", temp.path());
-    cmd.assert().success().stdout(contains("User: u"));
-    Ok(())
 }
