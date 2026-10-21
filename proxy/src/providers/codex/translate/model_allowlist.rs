@@ -99,7 +99,7 @@ pub fn resolve_model_request_with_config_override(
     resolve_with_model_override(model, override_model.as_deref())
 }
 
-fn resolve_with_model_override(model: &str, override_model: Option<&str>) -> ResolvedModel {
+pub fn resolve_with_model_override(model: &str, override_model: Option<&str>) -> ResolvedModel {
     let alias = MODEL_ALIASES
         .iter()
         .find(|(alias, _)| *alias == model)
