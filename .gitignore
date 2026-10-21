@@ -1,4 +1,16 @@
+# Rust build output (proxy/target)
 target/
+
+# Written by Claude Code when it loads the plugin
 .claude-plugin/types/
+.mcpb-cache/
+
+# Local Claude Code settings (absolute paths, permissions)
+.claude/settings.local.json
+
+node_modules/
 *.log
-.smoke/
+
+# OS files
+.DS_Store
+Thumbs.db
