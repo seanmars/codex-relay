@@ -110,7 +110,7 @@ impl Provider for IdentityCaptureProvider {
     }
 
     fn supported_models(&self) -> Vec<String> {
-        vec!["gpt-5.5".to_string(), "gpt-6-luna".to_string()]
+        vec!["gpt-6-astra".to_string(), "gpt-6-luna".to_string()]
     }
 
     fn cli(&self) -> &'static dyn CliHandlers {
@@ -189,7 +189,7 @@ async fn messages_ingress_forwards_only_strict_conversation_identity() {
     )));
     let normal_body = || {
         json!({
-            "model": "gpt-5.5",
+            "model": "gpt-6-astra",
             "max_tokens": 32,
             "messages": [{"role": "user", "content": "hello"}]
         })
@@ -233,7 +233,7 @@ async fn messages_ingress_forwards_only_strict_conversation_identity() {
                 ("x-claude-code-agent-id", "agent-auto-review"),
             ],
             json!({
-                "model": "gpt-5.5",
+                "model": "gpt-6-astra",
                 "max_tokens": 32,
                 "messages": [{"role": "user", "content": "review"}],
                 "system": [{
@@ -452,8 +452,8 @@ async fn successful_response_carries_a_request_id() {
             }) as Arc<dyn Provider>],
         ))
     };
-    let first = messages_response(app(registry()), "gpt-5.5").await;
-    let second = messages_response(app(registry()), "gpt-5.5").await;
+    let first = messages_response(app(registry()), "gpt-6-astra").await;
+    let second = messages_response(app(registry()), "gpt-6-astra").await;
 
     assert_eq!(first.status(), StatusCode::OK);
     assert!(!request_id(&first).is_empty());
@@ -619,7 +619,7 @@ async fn known_model_reaches_codex_provider() {
                 .uri("/v1/messages")
                 .header("content-type", "application/json")
                 .body(body_string(
-                    r#"{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}"#,
+                    r#"{"model":"gpt-6-sol","messages":[{"role":"user","content":"hello"}]}"#,
                 ))
                 .unwrap(),
         )
@@ -644,7 +644,7 @@ async fn count_tokens_routes_to_provider() {
                 .uri("/v1/messages/count_tokens")
                 .header("content-type", "application/json")
                 .body(body_string(
-                    r#"{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}"#,
+                    r#"{"model":"gpt-6-sol","messages":[{"role":"user","content":"hello"}]}"#,
                 ))
                 .unwrap(),
         )
@@ -975,7 +975,7 @@ async fn native_responses_route_is_disabled_by_default_option() {
                 .method(Method::POST)
                 .uri("/v1/responses")
                 .header("content-type", "application/json")
-                .body(body_string(r#"{"model":"gpt-5.4","input":"hello"}"#))
+                .body(body_string(r#"{"model":"gpt-6-sol","input":"hello"}"#))
                 .unwrap(),
         )
         .await
@@ -1115,7 +1115,7 @@ async fn monitor_records_successful_request_events() {
                 .header("content-type", "application/json")
                 .header("x-claude-code-session-id", "project-session")
                 .body(body_string(
-                    r##"{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.177.45c"},{"type":"text","text":"You are a Claude agent, built on Anthropic's Claude Agent SDK.","cache_control":{"type":"ephemeral"}},{"type":"text","text":"\nYou are an interactive agent.\n\n# Environment\nYou have been invoked in the following environment: \n - Primary working directory: /projects/example\n - Is a git repository: true","cache_control":{"type":"ephemeral"}}],"output_config":{"effort":"high"}}"##,
+                    r##"{"model":"gpt-6-sol","messages":[{"role":"user","content":"hello"}],"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.177.45c"},{"type":"text","text":"You are a Claude agent, built on Anthropic's Claude Agent SDK.","cache_control":{"type":"ephemeral"}},{"type":"text","text":"\nYou are an interactive agent.\n\n# Environment\nYou have been invoked in the following environment: \n - Primary working directory: /projects/example\n - Is a git repository: true","cache_control":{"type":"ephemeral"}}],"output_config":{"effort":"high"}}"##,
                 ))
                 .unwrap(),
         )
@@ -1143,7 +1143,7 @@ async fn monitor_records_successful_request_events() {
     assert_eq!(state.recent[0].project.as_deref(), Some("example"));
     assert_eq!(state.sessions[0].project.as_deref(), Some("example"));
     assert_eq!(state.recent[0].provider.as_deref(), Some("codex"));
-    assert_eq!(state.recent[0].model.as_deref(), Some("gpt-5.4"));
+    assert_eq!(state.recent[0].model.as_deref(), Some("gpt-6-sol"));
     assert_eq!(state.recent[0].effort.as_deref(), Some("high"));
     assert!(state.recent[0].input_tokens.is_some());
 }

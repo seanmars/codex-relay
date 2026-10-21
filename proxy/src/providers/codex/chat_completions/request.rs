@@ -569,12 +569,17 @@ mod tests {
             Some("unsupported_parameter")
         );
 
-        let mut full = base();
-        full["model"] = json!("gpt-5.4");
-        full["temperature"] = json!(0.2);
-        full["top_p"] = json!(0.9);
-        let translated = translate_request(full).unwrap();
-        assert_eq!(translated.upstream["temperature"], 0.2);
-        assert_eq!(translated.upstream["top_p"], 0.9);
+        // Every model the account lists runs on responses-lite, which takes no
+        // sampling controls: the full-lane branch has no allowed model left
+        for model in ALLOWED_MODELS {
+            let mut request = base();
+            request["model"] = json!(model);
+            request["top_p"] = json!(0.9);
+            assert_eq!(
+                translate_request(request).unwrap_err().param.as_deref(),
+                Some("top_p"),
+                "{model}"
+            );
+        }
     }
 }

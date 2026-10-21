@@ -84,7 +84,7 @@ async fn websocket_concurrent_requests() {
                 let (mut writer, _reader) = ws.split();
                 let req = serde_json::json!({
                     "type": "response.create",
-                    "model": "gpt-5.5",
+                    "model": "gpt-6-astra",
                     "input": [{"role":"user","content":[{"type":"input_text","text":format!("msg {i}")}]}]
                 });
                 let _ = writer
@@ -135,7 +135,7 @@ async fn websocket_request_serializes_response_create() {
     // Build a request with the codex format
     let req = serde_json::json!({
         "type": "response.create",
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}],
         "store": false,
         "parallel_tool_calls": true,
@@ -177,7 +177,7 @@ async fn websocket_collects_sse_events_until_terminal() {
     let (ws, _) = connect_async(ws_url).await.unwrap();
     let (mut writer, mut reader) = ws.split();
 
-    let req = serde_json::json!({"type": "response.create", "model": "gpt-5.5", "input": []});
+    let req = serde_json::json!({"type": "response.create", "model": "gpt-6-astra", "input": []});
     writer
         .send(Message::Text(serde_json::to_string(&req).unwrap()))
         .await
@@ -233,7 +233,7 @@ async fn websocket_idle_timeout_no_events() {
     let (ws, _) = connect_async(ws_url).await.unwrap();
     let (mut writer, mut reader) = ws.split();
 
-    let req = serde_json::json!({"type": "response.create", "model": "gpt-5.5", "input": []});
+    let req = serde_json::json!({"type": "response.create", "model": "gpt-6-astra", "input": []});
     writer
         .send(Message::Text(serde_json::to_string(&req).unwrap()))
         .await
@@ -268,7 +268,7 @@ async fn websocket_invalidation_on_error() {
     let (ws, _) = connect_async(ws_url).await.unwrap();
     let (mut writer, mut reader) = ws.split();
 
-    let req = serde_json::json!({"type": "response.create", "model": "gpt-5.5", "input": []});
+    let req = serde_json::json!({"type": "response.create", "model": "gpt-6-astra", "input": []});
     writer
         .send(Message::Text(serde_json::to_string(&req).unwrap()))
         .await
@@ -325,7 +325,7 @@ async fn websocket_soak_concurrent_requests() {
                 let (mut writer, mut reader) = ws.split();
                 let req = serde_json::json!({
                     "type": "response.create",
-                    "model": "gpt-5.5",
+                    "model": "gpt-6-astra",
                     "input": [{"role":"user","content":[{"type":"input_text","text":format!("soak {i}")}]}]
                 });
                 let _ = writer

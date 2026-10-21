@@ -703,9 +703,9 @@ mod tests {
         assert_eq!(body["model"], "gpt-6-sol");
         assert!(resolved.use_responses_lite);
 
-        let mut fast = request(json!({"model":"gpt-5.4-fast","input":[]}));
+        let mut fast = request(json!({"model":"gpt-6-luna-fast","input":[]}));
         let resolved = shape_native_request(&mut fast).unwrap();
-        assert_eq!(resolved.model, "gpt-5.4");
+        assert_eq!(resolved.model, "gpt-6-luna");
         assert_eq!(fast["service_tier"], "priority");
     }
 
@@ -713,7 +713,7 @@ mod tests {
     fn native_request_preserves_parallel_tool_calls() {
         for parallel in [false, true] {
             let mut body = request(json!({
-                "model":"gpt-5.4",
+                "model":"gpt-6-luna",
                 "input":[],
                 "parallel_tool_calls":parallel
             }));
@@ -749,7 +749,7 @@ mod tests {
     #[test]
     fn explicit_service_tier_is_preserved() {
         let mut body = request(json!({
-            "model":"gpt-5.4-fast",
+            "model":"gpt-6-luna-fast",
             "service_tier":"flex",
             "input":[]
         }));

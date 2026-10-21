@@ -75,7 +75,7 @@ fn isolated_environment(config_dir: &Path) -> Vec<EnvGuard> {
 
 fn compact_request() -> MessagesRequest {
     serde_json::from_value(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "messages": [{"role": "user", "content": "summarize"}],
         "system": "You are a helpful AI assistant tasked with summarizing conversations."
     }))
@@ -86,7 +86,7 @@ fn translate_compact() -> Value {
     let opts = TranslateOptions {
         session_id: None,
         service_tier: None,
-        model: "gpt-5.5".to_string(),
+        model: "gpt-6-astra".to_string(),
         use_responses_lite: false,
     };
     let out = translate_request(&compact_request(), opts).unwrap();

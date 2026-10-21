@@ -3,12 +3,6 @@ use crate::config;
 use super::request::ServiceTier;
 
 pub const ALLOWED_MODELS: &[&str] = &[
-    "gpt-5.2",
-    "gpt-5.3-codex",
-    "gpt-5.3-codex-spark",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.5",
     "gpt-5.6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
@@ -416,7 +410,7 @@ mod tests {
 
     #[test]
     fn allowed_models_accept_base() {
-        assert!(assert_allowed_model("gpt-5.4").is_ok());
+        assert!(assert_allowed_model("gpt-6-sol").is_ok());
         assert!(assert_allowed_model("gpt-5.6-sol").is_ok());
         assert!(assert_allowed_model("gpt-5.6-terra").is_ok());
         assert!(assert_allowed_model("gpt-6-astra").is_ok());
@@ -427,5 +421,15 @@ mod tests {
     #[test]
     fn not_allowed_rejected() {
         assert!(assert_allowed_model("gpt-7").is_err());
+        for retired in [
+            "gpt-5.2",
+            "gpt-5.3-codex",
+            "gpt-5.3-codex-spark",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.5",
+        ] {
+            assert!(assert_allowed_model(retired).is_err(), "{retired}");
+        }
     }
 }

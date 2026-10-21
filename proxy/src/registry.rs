@@ -22,12 +22,6 @@ pub const ANTHROPIC_STYLE_ALIASES: &[&str] = &[
 ];
 
 pub(crate) const CODEX_MODELS: &[&str] = &[
-    "gpt-5.2",
-    "gpt-5.3-codex",
-    "gpt-5.3-codex-spark",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.5",
     "gpt-5.6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",

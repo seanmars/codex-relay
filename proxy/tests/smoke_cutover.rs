@@ -313,11 +313,12 @@ async fn assert_codex_http_retries_structural_body_error(first_body: Vec<u8>) {
         spawn_retrying_truncated_http_upstream(first_body, success_body, attempts.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -371,11 +372,12 @@ async fn assert_codex_http_presemantic_retry(first_response: Vec<u8>) {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -963,7 +965,7 @@ async fn smoke_healthz_returns_ok() {
 #[allow(clippy::await_holding_lock)]
 async fn smoke_codex_model_routes_to_real_provider() {
     let _guard = env_lock();
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
     // Should attempt auth (not return 501 placeholder)
     assert!(
         response.status() != StatusCode::NOT_IMPLEMENTED,
@@ -996,10 +998,11 @@ async fn smoke_codex_http_messages_uses_mock_upstream() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let value: Value = serde_json::from_slice(
@@ -1011,7 +1014,7 @@ async fn smoke_codex_http_messages_uses_mock_upstream() {
     assert_eq!(value["content"][0]["text"], "codex http ok");
 
     let sent = captured.lock().unwrap().clone().unwrap();
-    assert_eq!(sent["model"], "gpt-5.5");
+    assert_eq!(sent["model"], "gpt-6-astra");
     assert_eq!(sent["stream"], true);
 }
 
@@ -1033,10 +1036,11 @@ async fn smoke_codex_native_responses_preserves_parallel_tool_calls() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let response = call_responses_body(json!({
-        "model":"gpt-5.4",
+        "model":"gpt-6-sol",
         "input":"hello",
         "parallel_tool_calls":false
     }))
@@ -1183,11 +1187,12 @@ async fn smoke_codex_http_usage_limit_event_fast_fails_live_request() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -1231,11 +1236,12 @@ async fn smoke_codex_http_header_only_usage_limit_event_fast_fails_live_request(
     });
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", format!("http://{addr}"));
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -1265,10 +1271,11 @@ async fn smoke_codex_http_usage_limit_event_fast_fails_buffered_request() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
     assert_usage_limit_response(response).await;
@@ -1297,11 +1304,12 @@ async fn smoke_codex_http_retries_empty_completion() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
 
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
     let status = response.status();
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -1341,11 +1349,12 @@ async fn smoke_codex_http_retries_empty_message_completion() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
 
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
     let status = response.status();
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -1381,12 +1390,13 @@ async fn smoke_codex_http_stream_retries_empty_completion() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
 
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"one"}]
@@ -1429,11 +1439,12 @@ async fn smoke_codex_http_empty_completions_exhaust_to_service_unavailable() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
 
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
     let status = response.status();
     let should_retry = response.headers().get("x-should-retry").cloned();
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -1488,6 +1499,7 @@ async fn smoke_auto_review_uses_codex_default_and_configured_override() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
@@ -1557,6 +1569,7 @@ async fn smoke_codex_http_server_compaction_fast_fails_usage_limit() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
@@ -1630,6 +1643,7 @@ async fn smoke_codex_http_server_compaction_replays_native_history() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
@@ -1734,12 +1748,13 @@ async fn smoke_codex_http_compaction_failure_preserves_portable_summary() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let _compaction_env = EnvGuard::set("CCP_CODEX_SERVER_COMPACTION", "1");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "system": "You are a helpful AI assistant tasked with summarizing conversations.",
         "messages": [{"role":"user","content":"old conversation"}]
@@ -1776,10 +1791,11 @@ async fn smoke_codex_http_context_window_error_requests_compaction() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
     let status = response.status();
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -1826,12 +1842,12 @@ async fn smoke_codex_http_traffic_capture_writes_upstream_artifacts() {
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let files = traffic_files(state.path());
     let request = traffic_json(&files, "020-upstream-request.json");
-    assert_eq!(request["model"], "gpt-5.5");
+    assert_eq!(request["model"], "gpt-6-astra");
 
     let metadata = traffic_json(&files, "021-upstream-request-metadata.json");
     assert_eq!(metadata["transport"], "http");
@@ -1878,7 +1894,7 @@ async fn smoke_codex_http_stream_traffic_captures_downstream_events() {
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -1955,13 +1971,14 @@ async fn smoke_codex_http_stream_returns_before_upstream_completion() {
     });
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = tokio::time::timeout(
         Duration::from_secs(3),
         call_messages_body(json!({
-            "model": "gpt-5.5",
+            "model": "gpt-6-astra",
             "max_tokens": 64,
             "stream": true,
             "messages": [{"role":"user","content":"hello"}]
@@ -2099,11 +2116,12 @@ async fn smoke_codex_http_incomplete_after_text_is_an_error() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2146,10 +2164,11 @@ async fn smoke_codex_http_preserves_permanent_policy_failure() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -2188,11 +2207,12 @@ async fn smoke_codex_http_rate_limit_snapshot_does_not_end_response() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2256,11 +2276,12 @@ async fn smoke_codex_http_usage_limit_status_fast_fails_live_request() {
     });
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2302,11 +2323,12 @@ async fn smoke_codex_http_bounds_initial_status_retries() {
     });
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2358,11 +2380,12 @@ async fn smoke_codex_http_does_not_retry_overload_after_semantic_output() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2410,11 +2433,12 @@ async fn smoke_codex_http_stops_after_retry_limit() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2465,11 +2489,12 @@ async fn smoke_codex_http_cancels_retry_backoff_when_request_drops() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let request = tokio::spawn(call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2504,11 +2529,12 @@ async fn smoke_codex_http_body_error_after_semantic_output_preserves_message() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2556,11 +2582,12 @@ async fn smoke_codex_http_body_error_after_closed_tool_is_not_success() {
     .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"read a file"}]
@@ -2608,7 +2635,7 @@ async fn smoke_codex_http_truncated_upstream_writes_reducer_diagnostic() {
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "http");
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
 
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     let files = traffic_files(state.path());
@@ -2636,11 +2663,12 @@ async fn smoke_codex_auto_fallback_usage_limit_fast_fails_live_request() {
             .await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "auto");
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2674,10 +2702,11 @@ async fn smoke_codex_websocket_messages_uses_mock_upstream() {
     let upstream = spawn_websocket_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
 
     let ws_status = response.status();
     let ws_body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -2701,7 +2730,7 @@ async fn smoke_codex_websocket_messages_uses_mock_upstream() {
         );
     });
     assert_eq!(sent["type"], "response.create");
-    assert_eq!(sent["model"], "gpt-5.5");
+    assert_eq!(sent["model"], "gpt-6-astra");
     assert!(sent.get("max_output_tokens").is_none());
     assert!(sent.get("stream").is_none());
 }
@@ -2723,7 +2752,7 @@ async fn smoke_codex_websocket_usage_limit_fast_fails_request() {
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2749,7 +2778,7 @@ async fn smoke_codex_websocket_uses_credits_after_included_limit() {
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
     let status = response.status();
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -2780,7 +2809,7 @@ async fn smoke_codex_websocket_stream_uses_credits_after_included_limit() {
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2814,6 +2843,7 @@ async fn smoke_codex_websocket_stream_returns_delta_before_terminal() {
     let upstream = spawn_websocket_delayed_terminal_upstream().await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
@@ -2821,7 +2851,7 @@ async fn smoke_codex_websocket_stream_returns_delta_before_terminal() {
     let response = tokio::time::timeout(
         Duration::from_millis(1_500),
         call_messages_body(json!({
-            "model": "gpt-5.5",
+            "model": "gpt-6-astra",
             "max_tokens": 64,
             "stream": true,
             "messages": [{"role":"user","content":"hello"}]
@@ -2869,12 +2899,13 @@ async fn smoke_codex_websocket_context_window_error_requests_compaction() {
     let upstream = spawn_websocket_error_upstream("input exceeds context window").await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"hello"}]
@@ -2910,13 +2941,14 @@ async fn smoke_codex_websocket_stream_uses_previous_response_id() {
     let upstream = spawn_websocket_sequence_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
 
     let first = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"one"}]
@@ -2928,7 +2960,7 @@ async fn smoke_codex_websocket_stream_uses_previous_response_id() {
         .unwrap();
 
     let second = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -2977,13 +3009,14 @@ async fn smoke_codex_websocket_stream_retries_missing_previous_response_id() {
     let upstream = spawn_websocket_previous_missing_then_retry_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
 
     let first = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"one"}]
@@ -2995,7 +3028,7 @@ async fn smoke_codex_websocket_stream_retries_missing_previous_response_id() {
         .unwrap();
 
     let second = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -3042,13 +3075,14 @@ async fn smoke_codex_websocket_stream_retries_empty_close_with_full_context() {
     let upstream = spawn_websocket_close_then_retry_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
 
     let first = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"one"}]
@@ -3060,7 +3094,7 @@ async fn smoke_codex_websocket_stream_retries_empty_close_with_full_context() {
         .unwrap();
 
     let second = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -3133,7 +3167,7 @@ async fn smoke_codex_websocket_stream_retries_terminal_only_completion_with_full
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
 
     let first = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"one"}]
@@ -3145,7 +3179,7 @@ async fn smoke_codex_websocket_stream_retries_terminal_only_completion_with_full
         .unwrap();
 
     let second = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [
@@ -3210,12 +3244,13 @@ async fn smoke_codex_websocket_empty_completions_exhaust_to_service_unavailable(
     let upstream = spawn_websocket_always_empty_completion_upstream(request_count.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
 
     let response = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "stream": true,
         "messages": [{"role":"user","content":"one"}]
@@ -3260,13 +3295,14 @@ async fn smoke_codex_websocket_previous_response_id_sends_delta_on_second_turn()
     let upstream = spawn_websocket_sequence_upstream(captured.clone()).await;
 
     let _config_env = EnvGuard::set("CCP_CONFIG_DIR", config.path());
+
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
     let _previous_response_env = EnvGuard::set("CCP_CODEX_PREVIOUS_RESPONSE_ID", "1");
 
     let first = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "messages": [{"role":"user","content":"one"}]
     }))
@@ -3274,7 +3310,7 @@ async fn smoke_codex_websocket_previous_response_id_sends_delta_on_second_turn()
     assert_eq!(first.status(), StatusCode::OK);
 
     let second = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "messages": [
             {"role":"user","content":"one"},
@@ -3297,7 +3333,7 @@ async fn smoke_codex_websocket_previous_response_id_sends_delta_on_second_turn()
     assert_eq!(value["content"][0]["text"], "second");
 
     let third = call_messages_body(json!({
-        "model": "gpt-5.5",
+        "model": "gpt-6-astra",
         "max_tokens": 64,
         "messages": [
             {"role":"user","content":"one"},
@@ -3365,7 +3401,7 @@ async fn smoke_codex_websocket_traffic_capture_writes_upstream_artifacts() {
     let _auth_source_env = EnvGuard::set("CCP_CODEX_AUTH_SOURCE", "proxy");
     let _base_url_env = EnvGuard::set("CCP_CODEX_BASE_URL", &upstream);
     let _transport_env = EnvGuard::set("CCP_CODEX_TRANSPORT", "websocket");
-    let response = call_messages("gpt-5.5").await;
+    let response = call_messages("gpt-6-astra").await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let files = traffic_files(state.path());
