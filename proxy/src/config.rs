@@ -232,12 +232,12 @@ fn load_config_from_env(deps: &paths::DirResolverEnv) -> LoadedConfig {
             .and_then(|raw| parse_alias(raw.trim()))
             .or_else(|| parse_alias(file?.alias_provider.as_deref()?.trim()))
             .unwrap_or(AliasProvider::Codex),
-        // The log flags keep their legacy rule: the variable being set turns
-        // the flag on, whatever its value
-        log_verbose: env.contains_key("CCP_LOG_VERBOSE")
-            || file.and_then(|f| f.log.as_ref()?.verbose).unwrap_or(false),
-        log_stderr: env.contains_key("CCP_LOG_STDERR")
-            || file.and_then(|f| f.log.as_ref()?.stderr).unwrap_or(false),
+        log_verbose: env_bool(env, "CCP_LOG_VERBOSE")
+            .or_else(|| file?.log.as_ref()?.verbose)
+            .unwrap_or(false),
+        log_stderr: env_bool(env, "CCP_LOG_STDERR")
+            .or_else(|| file?.log.as_ref()?.stderr)
+            .unwrap_or(false),
         config_dir,
     }
 }
@@ -279,10 +279,10 @@ pub fn config_override_summary_lines(cfg: &LoadedConfig) -> Vec<String> {
     if env_string(&env, "CCP_ALIAS_PROVIDER").is_some() {
         out.push("aliasProvider (env)".to_string());
     }
-    if env.contains_key("CCP_LOG_VERBOSE") {
+    if env_bool(&env, "CCP_LOG_VERBOSE").is_some() {
         out.push("log.verbose (env)".to_string());
     }
-    if env.contains_key("CCP_LOG_STDERR") {
+    if env_bool(&env, "CCP_LOG_STDERR").is_some() {
         out.push("log.stderr (env)".to_string());
     }
     if env_bool(&env, "CCP_CODEX_RESPONSES_API").is_some() {
@@ -1201,14 +1201,25 @@ mod tests {
     }
 
     #[test]
-    fn log_env_presence_enables_legacy_verbose_and_stderr() {
+    fn log_env_flags_use_the_shared_bool_rule() {
         let config = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            config.path().join("config.json"),
+            r#"{"log":{"verbose":true,"stderr":true}}"#,
+        )
+        .unwrap();
         let mut env = config_env(&config);
         env.insert("CCP_LOG_VERBOSE".to_string(), "0".to_string());
-        env.insert("CCP_LOG_STDERR".to_string(), String::new());
+        env.insert("CCP_LOG_STDERR".to_string(), "off".to_string());
+        let loaded = load_config_for_env(&env);
+        assert!(!loaded.log_verbose);
+        assert!(!loaded.log_stderr);
 
+        env.insert("CCP_LOG_VERBOSE".to_string(), "on".to_string());
+        env.insert("CCP_LOG_STDERR".to_string(), String::new());
         let loaded = load_config_for_env(&env);
         assert!(loaded.log_verbose);
+        // A blank value is unset, so config.json decides
         assert!(loaded.log_stderr);
     }
 
