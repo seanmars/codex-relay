@@ -1168,7 +1168,7 @@ impl CodexHttpClient {
             origin: CodexErrorOrigin::Http,
         })?;
         let mut auth_refresh_attempted = false;
-        let use_responses_lite = body.client_metadata.is_some();
+        let use_responses_lite = body.lane.is_lite();
         let mut retries = 0_u32;
         let (resp, response_headers, started_at) = loop {
             match self
@@ -1675,13 +1675,12 @@ impl CodexHttpClient {
                         usage_limit: None,
                         origin: CodexErrorOrigin::Http,
                     })?;
-                    self.attempt_post_http(&auth, &body_json, ctx, body.client_metadata.is_some())
+                    self.attempt_post_http(&auth, &body_json, ctx, body.lane.is_lite())
                         .await
                         .map(|response| OwnerAwareCodexResponse::new(response, None))
                 }
                 CodexTransport::WebSocket => {
-                    let ws_headers =
-                        build_codex_headers(&auth, ctx, body.client_metadata.is_some())?;
+                    let ws_headers = build_codex_headers(&auth, ctx, body.lane.is_lite())?;
                     let ws_headers = super::websocket::codex_websocket_headers(&ws_headers);
                     let ws_body = build_websocket_request(
                         body,
@@ -1705,8 +1704,7 @@ impl CodexHttpClient {
                     .await
                 }
                 CodexTransport::Auto => {
-                    let ws_headers =
-                        build_codex_headers(&auth, ctx, body.client_metadata.is_some())?;
+                    let ws_headers = build_codex_headers(&auth, ctx, body.lane.is_lite())?;
                     let ws_headers = super::websocket::codex_websocket_headers(&ws_headers);
                     let ws_body = build_websocket_request(
                         body,
@@ -1753,14 +1751,9 @@ impl CodexHttpClient {
                                     usage_limit: None,
                                     origin: CodexErrorOrigin::Http,
                                 })?;
-                            self.attempt_post_http(
-                                &auth,
-                                &body_json,
-                                ctx,
-                                body.client_metadata.is_some(),
-                            )
-                            .await
-                            .map(|response| OwnerAwareCodexResponse::new(response, None))
+                            self.attempt_post_http(&auth, &body_json, ctx, body.lane.is_lite())
+                                .await
+                                .map(|response| OwnerAwareCodexResponse::new(response, None))
                         }
                         Err(err) => Err(err),
                     }
@@ -2082,8 +2075,7 @@ impl CodexHttpClient {
 
         'attempt: loop {
             socket_id_publisher.publish(None);
-            let ws_headers = match build_codex_headers(&auth, &ctx, body.client_metadata.is_some())
-            {
+            let ws_headers = match build_codex_headers(&auth, &ctx, body.lane.is_lite()) {
                 Ok(headers) => super::websocket::codex_websocket_headers(&headers),
                 Err(err) => {
                     if tx.send(Err(err)).await.is_err() {
@@ -3176,6 +3168,7 @@ mod tests {
             parallel_tool_calls: true,
             include: None,
             client_metadata: None,
+            lane: Default::default(),
             service_tier: None,
             prompt_cache_key: None,
             text: super::super::translate::request::ResponsesText {
@@ -3478,6 +3471,103 @@ mod tests {
         assert!(retryable_http_stream_error(&http_sse_error(
             "Codex SSE frame contains invalid UTF-8",
         )));
+    }
+
+    /// Sends `request` over the HTTP transport and returns the request headers
+    /// the upstream saw, keyed by lowercase name
+    async fn upstream_headers_for(
+        request: ResponsesRequest,
+    ) -> std::collections::HashMap<String, String> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await;
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            write_http_chunk(
+                &mut stream,
+                b"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{}}}\n\n",
+            )
+            .await;
+            write_http_chunk(&mut stream, b"").await;
+            request
+        });
+
+        let client = Arc::new(authenticated_http_test_client(format!(
+            "http://{addr}/responses"
+        )));
+        let mut events = client
+            .stream_codex_http_events(&request, &http_test_context())
+            .await
+            .unwrap();
+        let request = server.await.unwrap();
+        while let Some(event) = events.recv().await {
+            if event.unwrap().get("type").and_then(|value| value.as_str())
+                == Some("response.completed")
+            {
+                break;
+            }
+        }
+
+        let header_end = request
+            .windows(4)
+            .position(|part| part == b"\r\n\r\n")
+            .unwrap();
+        String::from_utf8_lossy(&request[..header_end])
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                Some((name.trim().to_ascii_lowercase(), value.trim().to_string()))
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn lite_lane_sets_lite_header_originator_and_user_agent() {
+        let mut request = buffered_test_request();
+        request.lane = super::super::translate::request::ResponsesLane::Lite;
+        let headers = upstream_headers_for(request).await;
+
+        let expected = build_codex_headers(&http_test_auth(), &http_test_context(), true).unwrap();
+        assert_eq!(
+            headers
+                .get("x-openai-internal-codex-responses-lite")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            headers.get("originator").map(String::as_str),
+            Some(RESPONSES_LITE_ORIGINATOR)
+        );
+        assert_eq!(
+            headers.get("user-agent").map(String::as_str),
+            expected
+                .get(http::header::USER_AGENT)
+                .map(|value| value.to_str().unwrap())
+        );
+    }
+
+    // Another feature may set client_metadata for its own reasons: without
+    // the lite lane the request keeps the normal lane's headers
+    #[tokio::test]
+    async fn client_metadata_without_lite_lane_keeps_normal_headers() {
+        let normal = upstream_headers_for(buffered_test_request()).await;
+
+        let mut request = buffered_test_request();
+        request.client_metadata =
+            super::super::translate::request::ResponsesLane::Lite.client_metadata();
+        let with_metadata = upstream_headers_for(request).await;
+
+        assert!(!with_metadata.contains_key("x-openai-internal-codex-responses-lite"));
+        for name in ["originator", "user-agent"] {
+            assert_eq!(with_metadata.get(name), normal.get(name), "{name}");
+        }
     }
 
     #[tokio::test]
@@ -5305,6 +5395,7 @@ mod tests {
             parallel_tool_calls: true,
             include: None,
             client_metadata: None,
+            lane: Default::default(),
             service_tier: None,
             prompt_cache_key: None,
             text: super::super::translate::request::ResponsesText {

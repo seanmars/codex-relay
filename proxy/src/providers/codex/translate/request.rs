@@ -101,6 +101,44 @@ pub struct ResponsesRequest {
     pub text: ResponsesText,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ResponsesReasoning>,
+    /// The transport picks headers, originator and user agent from this, never
+    /// from `client_metadata`, which other features may set for other reasons
+    #[serde(skip)]
+    pub lane: ResponsesLane,
+}
+
+/// Which upstream lane a request runs on
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ResponsesLane {
+    #[default]
+    Normal,
+    Lite,
+}
+
+impl ResponsesLane {
+    pub fn from_use_responses_lite(use_responses_lite: bool) -> Self {
+        if use_responses_lite {
+            Self::Lite
+        } else {
+            Self::Normal
+        }
+    }
+
+    pub fn is_lite(self) -> bool {
+        self == Self::Lite
+    }
+
+    /// The one place that builds the lane's `client_metadata`, for the
+    /// messages and chat paths alike. The `ws_request_header_` key follows
+    /// the Codex CLI convention for headers that ride a WebSocket request
+    pub fn client_metadata(self) -> Option<std::collections::HashMap<String, String>> {
+        self.is_lite().then(|| {
+            std::collections::HashMap::from([(
+                "ws_request_header_x_openai_internal_codex_responses_lite".to_string(),
+                "true".to_string(),
+            )])
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -542,6 +580,7 @@ fn translate_request_inner(
         text.format = Some(fmt);
     }
 
+    let lane = ResponsesLane::from_use_responses_lite(opts.use_responses_lite);
     let mut out = ResponsesRequest {
         model: opts.model,
         instructions,
@@ -553,17 +592,14 @@ fn translate_request_inner(
         text,
         tools: None,
         include: None,
-        client_metadata: None,
+        client_metadata: lane.client_metadata(),
         service_tier: None,
         prompt_cache_key: None,
         reasoning: None,
+        lane,
     };
 
-    if opts.use_responses_lite {
-        out.client_metadata = Some(std::collections::HashMap::from([(
-            "ws_request_header_x_openai_internal_codex_responses_lite".to_string(),
-            "true".to_string(),
-        )]));
+    if lane.is_lite() {
         out.parallel_tool_calls = false;
 
         let mut prefix = Vec::new();
@@ -2597,7 +2633,11 @@ mod tests {
         assert!(out.instructions.is_none());
         assert!(out.tools.is_none());
         assert!(!out.parallel_tool_calls);
-        assert!(out.client_metadata.is_some());
+        assert_eq!(out.lane, ResponsesLane::Lite);
+        assert_eq!(
+            serde_json::to_value(&out).unwrap()["client_metadata"],
+            json!({"ws_request_header_x_openai_internal_codex_responses_lite": "true"})
+        );
         assert_eq!(out.input.len(), 3);
         assert!(matches!(
             out.input[0],
@@ -2609,6 +2649,21 @@ mod tests {
         } else {
             panic!("expected developer message");
         }
+    }
+
+    #[test]
+    fn normal_lane_sends_no_client_metadata_and_never_serializes_the_lane() {
+        let req: MessagesRequest = serde_json::from_value(json!({
+            "model": "gpt-5.5",
+            "messages": [{"role":"user", "content":"hello"}]
+        }))
+        .unwrap();
+        let out = translate(&req, opts()).unwrap();
+        assert_eq!(out.lane, ResponsesLane::Normal);
+        assert!(out.client_metadata.is_none());
+        let wire = serde_json::to_value(&out).unwrap();
+        assert!(wire.get("client_metadata").is_none());
+        assert!(wire.get("lane").is_none());
     }
 
     #[test]

@@ -2437,6 +2437,7 @@ mod tests {
             parallel_tool_calls: true,
             include: None,
             client_metadata: None,
+            lane: Default::default(),
             service_tier: None,
             prompt_cache_key: None,
             text: super::super::translate::request::ResponsesText {

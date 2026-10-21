@@ -5,7 +5,7 @@ use crate::providers::codex::translate::{
     model_allowlist::{
         ALLOWED_MODELS, assert_allowed_model, resolve_with_model_override, uses_responses_lite,
     },
-    request::{Effort, pick_service_tier, resolve_effort_override, to_codex_effort},
+    request::{Effort, ResponsesLane, pick_service_tier, resolve_effort_override, to_codex_effort},
 };
 use crate::{
     config::{self, CodexRequestConfig},
@@ -128,9 +128,14 @@ pub(super) fn translate_request_with_overrides(
         ("store".to_string(), json!(false)),
         ("stream".to_string(), json!(true)),
         ("parallel_tool_calls".to_string(), json!(false)),
-        ("client_metadata".to_string(), json!({"lite":"true"})),
         ("text".to_string(), Value::Object(text)),
     ]);
+    // The same lane metadata the messages path sends
+    if let Some(metadata) =
+        ResponsesLane::from_use_responses_lite(use_responses_lite).client_metadata()
+    {
+        upstream.insert("client_metadata".to_string(), json!(metadata));
+    }
     if let Some(tier) = service_tier {
         upstream.insert(
             "service_tier".to_string(),
@@ -477,6 +482,11 @@ mod tests {
         assert_eq!(translated.upstream["stream"], true);
         assert_eq!(translated.upstream["reasoning"]["effort"], "medium");
         assert_eq!(translated.upstream["reasoning"]["context"], "all_turns");
+        assert!(translated.use_responses_lite);
+        assert_eq!(
+            translated.upstream["client_metadata"],
+            json!(ResponsesLane::Lite.client_metadata())
+        );
     }
 
     #[test]
