@@ -1,4 +1,6 @@
-// Pure helpers for the relay: config, routing decisions and sticky session state. No I/O beyond path math.
+// Pure helpers for the relay: config, routing decisions and sticky session state. No I/O beyond path math and
+// resolving a directory's real path.
+import fs from 'node:fs'
 import path from 'node:path'
 
 export const DEFAULT_PORT = 8960
@@ -11,6 +13,29 @@ export const isRoute = (r) => ROUTES.includes(r)
 
 export function claudeConfigDir(env = process.env) {
   return env.CLAUDE_CONFIG_DIR || path.join(env.USERPROFILE || env.HOME || '', '.claude')
+}
+
+// Two spellings of one directory (drive-letter case, slashes, symlinks) are the same config dir; the relay, the CLI and
+// the hook use this to tell whose relay answers on a port
+export function realDir(d) {
+  try {
+    return fs.realpathSync.native(d)
+  } catch {
+    return path.resolve(d)
+  }
+}
+const dirKey = (d, win) => (win ? d.replace(/\\/g, '/').toLowerCase() : d)
+export const sameDir = (a, b, win = process.platform === 'win32') => dirKey(realDir(a), win) === dirKey(realDir(b), win)
+
+// -1, 0 or 1 for dotted numeric versions; a missing part counts as 0
+export function compareVersions(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d < 0 ? -1 : 1
+  }
+  return 0
 }
 
 export const configFile = (dir) => path.join(dir, 'codex-relay.json')

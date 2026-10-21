@@ -1,5 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import * as L from './logic.mjs'
 
 const cfg = (over = {}) => ({ ...L.parseConfig(''), ...over })
@@ -73,6 +76,20 @@ test('isLocalRequest wants the relay port and no browser headers', () => {
   assert.ok(!L.isLocalRequest({ host: '127.0.0.1:8950' }, 8960))
   assert.ok(!L.isLocalRequest({ host: 'evil.test:8960' }, 8960))
   assert.ok(!L.isLocalRequest({ host: '127.0.0.1:8960', origin: 'https://evil.test' }, 8960))
+})
+
+test('sameDir compares real paths, ignoring case and slashes on Windows only', () => {
+  const tmp = fs.realpathSync.native(os.tmpdir())
+  assert.ok(L.sameDir(tmp, `${tmp}${path.sep}`))
+  assert.ok(L.sameDir(tmp.toUpperCase().replace(/\\/g, '/'), tmp, true))
+  assert.ok(!L.sameDir(tmp, path.join(tmp, 'other'), true))
+  assert.ok(!L.sameDir('/a/B', '/a/b', false))
+})
+
+test('compareVersions orders dotted versions, a missing part counting as 0', () => {
+  assert.equal(L.compareVersions('0.1.0', '0.2.0'), -1)
+  assert.equal(L.compareVersions('0.10.0', '0.9.9'), 1)
+  assert.equal(L.compareVersions('1.0', '1.0.0'), 0)
 })
 
 test('sessionStats and usageSummary read the proxy answers', () => {
