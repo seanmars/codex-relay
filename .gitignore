@@ -1,0 +1,4 @@
+target/
+.claude-plugin/types/
+*.log
+.smoke/
