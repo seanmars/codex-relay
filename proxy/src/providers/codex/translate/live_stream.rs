@@ -7,14 +7,15 @@ use crate::providers::codex::events::{
 use crate::traffic::TrafficCapture;
 
 use super::IncompleteResponsePolicy;
-use super::read_rewrite::sanitize_read_args;
+use super::read_rewrite::{
+    repair_whitespace_stalled_read_args, sanitize_read_args, should_buffer_tool_args,
+};
 use super::reasoning_signature::{PendingReasoning, encode_reasoning_signature};
 use super::reducer::{
-    CodexUsage, STOP_END_TURN, STOP_MAX_TOKENS, STOP_TOOL_USE, map_codex_usage_to_anthropic,
+    BUFFERED_TOOL_MAX_ARGS_BYTES, CodexUsage, STOP_END_TURN, STOP_MAX_TOKENS, STOP_TOOL_USE,
+    map_codex_usage_to_anthropic, parse_codex_usage, web_search_query,
 };
-
-const BUFFERED_READ_REPAIR_TRAILING_WHITESPACE_BYTES: usize = 1_024;
-const BUFFERED_TOOL_MAX_ARGS_BYTES: usize = 5_000_000;
+use super::web_search_compat::server_tool_use_id_from_codex_web_search_id;
 
 enum LiveBlock {
     Text {
@@ -374,7 +375,7 @@ impl LiveStreamTranslator {
                         name: name.clone(),
                         args_accum: String::new(),
                         had_delta: false,
-                        buffer_until_done: name == "Read",
+                        buffer_until_done: should_buffer_tool_args(&name),
                         emitted_args: false,
                     },
                 );
@@ -690,7 +691,7 @@ impl LiveStreamTranslator {
             self.web_searches.push(LiveWebSearch {
                 index,
                 result_index,
-                id: super::web_search_compat::server_tool_use_id_from_codex_web_search_id(raw_id),
+                id: server_tool_use_id_from_codex_web_search_id(raw_id),
                 query: web_search_query(item),
             });
             return;
@@ -1072,115 +1073,11 @@ impl LiveStreamTranslator {
     }
 }
 
-fn web_search_query(item: &serde_json::Value) -> String {
-    let Some(action) = item.get("action") else {
-        return String::new();
-    };
-    action
-        .get("query")
-        .and_then(|v| v.as_str())
-        .or_else(|| {
-            action
-                .get("queries")
-                .and_then(|v| v.as_array())
-                .and_then(|queries| queries.iter().find_map(|query| query.as_str()))
-        })
-        .unwrap_or("")
-        .to_string()
-}
-
 fn output_index(payload: &serde_json::Value) -> usize {
     payload
         .get("output_index")
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as usize
-}
-
-fn parse_codex_usage(response: &serde_json::Value) -> CodexUsage {
-    let usage = match response.get("usage") {
-        Some(u) => u,
-        None => return CodexUsage::default(),
-    };
-    CodexUsage {
-        input_tokens: usage.get("input_tokens").and_then(|v| v.as_u64()),
-        output_tokens: usage.get("output_tokens").and_then(|v| v.as_u64()),
-        input_tokens_details_cached: usage
-            .get("input_tokens_details")
-            .and_then(|d| d.get("cached_tokens"))
-            .and_then(|v| v.as_u64()),
-        output_tokens_details_reasoning: usage
-            .get("output_tokens_details")
-            .and_then(|d| d.get("reasoning_tokens"))
-            .and_then(|v| v.as_u64()),
-    }
-}
-
-fn repair_whitespace_stalled_read_args(
-    name: &str,
-    args: &str,
-    call_id: Option<&str>,
-) -> Option<String> {
-    if name != "Read" {
-        return None;
-    }
-    let trimmed = args.trim_end();
-    let trailing_whitespace = args.len().saturating_sub(trimmed.len());
-    if trailing_whitespace < BUFFERED_READ_REPAIR_TRAILING_WHITESPACE_BYTES {
-        return None;
-    }
-    parse_read_args_candidate(trimmed, call_id).or_else(|| {
-        let with_brace = format!("{trimmed}}}");
-        parse_read_args_candidate(&with_brace, call_id)
-    })
-}
-
-fn parse_read_args_candidate(args: &str, call_id: Option<&str>) -> Option<String> {
-    let parsed: serde_json::Value = serde_json::from_str(args).ok()?;
-    if !is_valid_read_args(&parsed) {
-        return None;
-    }
-    Some(sanitize_read_args(
-        "Read",
-        &serde_json::to_string(&parsed).ok()?,
-        call_id,
-    ))
-}
-
-fn is_valid_read_args(value: &serde_json::Value) -> bool {
-    let Some(obj) = value.as_object() else {
-        return false;
-    };
-    for key in obj.keys() {
-        if !matches!(key.as_str(), "file_path" | "offset" | "limit" | "pages") {
-            return false;
-        }
-    }
-    let Some(file_path) = obj.get("file_path").and_then(|v| v.as_str()) else {
-        return false;
-    };
-    if file_path.is_empty() {
-        return false;
-    }
-    if let Some(offset) = obj.get("offset").and_then(|v| v.as_i64())
-        && offset < 0
-    {
-        return false;
-    }
-    if let Some(limit) = obj.get("limit").and_then(|v| v.as_i64())
-        && limit <= 0
-    {
-        return false;
-    }
-    if obj.get("offset").is_some_and(|v| !v.is_i64()) {
-        return false;
-    }
-    if obj.get("limit").is_some_and(|v| !v.is_i64()) {
-        return false;
-    }
-    if obj.get("pages").is_some_and(|v| !v.is_string()) {
-        return false;
-    }
-    true
 }
 
 #[cfg(test)]

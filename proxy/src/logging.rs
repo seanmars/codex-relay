@@ -1,3 +1,4 @@
+use crate::paths::set_mode;
 use crate::{config, paths};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -154,22 +155,6 @@ fn create_dir(path: &Path, mode: u32) -> io::Result<()> {
     Ok(())
 }
 
-fn set_mode(path: &Path, mode: u32) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(path) {
-            let mut perm = meta.permissions();
-            perm.set_mode(mode);
-            let _ = fs::set_permissions(path, perm);
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, mode);
-    }
-}
-
 fn now_iso8601() -> String {
     let now = time::OffsetDateTime::now_utc();
     let format = time::format_description::parse_borrowed::<3>(
@@ -180,17 +165,17 @@ fn now_iso8601() -> String {
 }
 
 pub fn redact_value(value: Value) -> Value {
-    redact_with_depth(value, 0)
+    redact_with_depth(value, 0, config::log_verbose())
 }
 
-fn redact_with_depth(value: Value, depth: u8) -> Value {
+fn redact_with_depth(value: Value, depth: u8, verbose: bool) -> Value {
     if depth > 6 {
         return Value::String("[depth-limit]".into());
     }
 
     match value {
         Value::String(s) => {
-            if config::log_verbose() {
+            if verbose {
                 Value::String(s)
             } else if s.len() > 4000 {
                 Value::String(format!("{}…[{} more]", &s[..4000], s.len() - 4000))
@@ -201,7 +186,7 @@ fn redact_with_depth(value: Value, depth: u8) -> Value {
         Value::Array(values) => Value::Array(
             values
                 .into_iter()
-                .map(|v| redact_with_depth(v, depth + 1))
+                .map(|v| redact_with_depth(v, depth + 1, verbose))
                 .collect(),
         ),
         Value::Object(fields) => {
@@ -210,7 +195,7 @@ fn redact_with_depth(value: Value, depth: u8) -> Value {
                 if REDACT_KEYS.contains(&key.to_lowercase().as_str()) {
                     out.insert(key, redact_key_redaction(value));
                 } else {
-                    out.insert(key, redact_with_depth(value, depth + 1));
+                    out.insert(key, redact_with_depth(value, depth + 1, verbose));
                 }
             }
             Value::Object(out)

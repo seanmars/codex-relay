@@ -4,8 +4,8 @@ use serde_json::to_string_pretty;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::marker::PhantomData;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+
+use crate::paths::set_mode;
 
 pub trait AuthStorage<T>: Send + Sync
 where
@@ -21,23 +21,6 @@ pub trait Keychain: Send + Sync {
     fn read(&self, service: &str, account: &str) -> Result<Option<String>>;
     fn write(&self, service: &str, account: &str, value: &str) -> Result<()>;
     fn delete(&self, service: &str, account: &str) -> Result<()>;
-}
-
-#[derive(Default)]
-pub struct StubKeychain;
-
-impl Keychain for StubKeychain {
-    fn read(&self, _service: &str, _account: &str) -> Result<Option<String>> {
-        Ok(None)
-    }
-
-    fn write(&self, _service: &str, _account: &str, _value: &str) -> Result<()> {
-        Ok(())
-    }
-
-    fn delete(&self, _service: &str, _account: &str) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(Default, Clone, Copy)]
@@ -292,42 +275,6 @@ pub fn load_auth_file<T: DeserializeOwned>(path: &str) -> Option<T> {
     serde_json::from_str::<T>(&raw).ok()
 }
 
-pub fn load_auth_file_value(path: &std::path::Path) -> Option<serde_json::Value> {
-    let mut file = File::open(path).ok()?;
-    let mut raw = String::new();
-    file.read_to_string(&mut raw).ok()?;
-    serde_json::from_str::<serde_json::Value>(&raw).ok()
-}
-
-pub fn load_auth_file_with_legacy<T: DeserializeOwned>(
-    primary: &std::path::Path,
-    legacy: &std::path::Path,
-) -> Option<T> {
-    if let Some(value) = load_auth_file_value(primary) {
-        return serde_json::from_value(value).ok();
-    }
-    if primary == legacy {
-        None
-    } else {
-        load_auth_file_value(legacy).and_then(|value| serde_json::from_value(value).ok())
-    }
-}
-
-pub fn delete_auth_file(primary: &std::path::Path, legacy: &std::path::Path) -> io::Result<()> {
-    if let Err(err) = fs::remove_file(primary)
-        && err.kind() != io::ErrorKind::NotFound
-    {
-        return Err(err);
-    }
-    if primary != legacy
-        && let Err(err) = fs::remove_file(legacy)
-        && err.kind() != io::ErrorKind::NotFound
-    {
-        return Err(err);
-    }
-    Ok(())
-}
-
 pub fn write_atomically<T: Serialize>(path: &str, value: &T) -> Result<()> {
     let dir = std::path::Path::new(path)
         .parent()
@@ -358,21 +305,6 @@ pub fn write_atomically<T: Serialize>(path: &str, value: &T) -> Result<()> {
     }
     set_mode(std::path::Path::new(path), 0o600);
     Ok(())
-}
-
-fn set_mode(path: &std::path::Path, mode: u32) {
-    #[cfg(unix)]
-    {
-        if let Ok(meta) = fs::metadata(path) {
-            let mut permissions = meta.permissions();
-            permissions.set_mode(mode);
-            let _ = fs::set_permissions(path, permissions);
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, mode);
-    }
 }
 
 pub struct InMemoryAuthStore<T>

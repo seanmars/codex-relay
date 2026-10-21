@@ -1,6 +1,23 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Best-effort permission tightening; a no-op on non-unix platforms.
+pub(crate) fn set_mode(path: &Path, mode: u32) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mut perm = meta.permissions();
+            perm.set_mode(mode);
+            let _ = std::fs::set_permissions(path, perm);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+    }
+}
+
 /// `std::env::consts::OS` on the platforms with dirs of their own.
 pub const WINDOWS: &str = "windows";
 pub const MACOS: &str = "macos";

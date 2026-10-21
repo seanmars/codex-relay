@@ -30,6 +30,7 @@ use crate::traffic::TrafficCapture;
 
 use super::client::{
     ActualTransport, CodexError, CodexErrorOrigin, CodexResponse, OwnerAwareCodexResponse,
+    headers_to_json, summarize_json_request_size,
 };
 use super::continuation::ContinuationReservation;
 
@@ -483,10 +484,6 @@ fn pool_insert_for_turn(reservation: &ContinuationReservation, entry: Arc<PoolEn
     .unwrap_or(false)
 }
 
-fn pool_remove_entry(owner: &ConversationIdentity, entry: &Arc<PoolEntry>) {
-    invalidate_pool_entry(owner, entry);
-}
-
 pub(super) fn invalidate_codex_websocket_pool_socket(
     reservation: &ContinuationReservation,
     socket_id: Option<u64>,
@@ -503,7 +500,7 @@ pub(super) fn invalidate_codex_websocket_pool_socket(
             .cloned()
     });
     if let Some(entry) = entry {
-        pool_remove_entry(owner, &entry);
+        invalidate_pool_entry(owner, &entry);
     }
 }
 
@@ -717,15 +714,6 @@ pub(super) fn event_error_status(payload: &serde_json::Value) -> Option<u16> {
     super::events::classify_event_failure(payload).and_then(|failure| failure.explicit_status)
 }
 
-#[allow(dead_code)]
-fn extract_retry_after(payload: &serde_json::Value) -> Option<String> {
-    payload
-        .get("error")
-        .and_then(|e| e.get("retry_after"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
 // ---------------------------------------------------------------------------
 // Main request function
 // ---------------------------------------------------------------------------
@@ -807,7 +795,7 @@ pub(super) async fn codex_websocket_request(
     {
         drop(guard);
         if let Some(owner) = pool_owner {
-            pool_remove_entry(owner, &entry);
+            invalidate_pool_entry(owner, &entry);
         }
         if requires_origin {
             return Err(continuation_socket_missing_error());
@@ -831,7 +819,7 @@ pub(super) async fn codex_websocket_request(
         .await
         .map_err(|error| {
             if let Some(owner) = pool_owner {
-                pool_remove_entry(owner, &entry);
+                invalidate_pool_entry(owner, &entry);
             }
             CodexError {
                 status: 0,
@@ -856,21 +844,21 @@ pub(super) async fn codex_websocket_request(
         Ok(result) => result,
         Err(error) => {
             if let Some(owner) = pool_owner {
-                pool_remove_entry(owner, &entry);
+                invalidate_pool_entry(owner, &entry);
             }
             return Err(error);
         }
     };
     let Some(terminal_event) = terminal_event else {
         if let Some(owner) = pool_owner {
-            pool_remove_entry(owner, &entry);
+            invalidate_pool_entry(owner, &entry);
         }
         return Err(missing_terminal_error());
     };
 
     if is_previous_response_missing(&terminal_event.payload) {
         if let Some(owner) = pool_owner {
-            pool_remove_entry(owner, &entry);
+            invalidate_pool_entry(owner, &entry);
         }
         return Err(CodexError {
             status: 0,
@@ -887,7 +875,7 @@ pub(super) async fn codex_websocket_request(
         reservation.is_some_and(|reservation| pool_insert_for_turn(reservation, entry.clone()))
     } else {
         if let Some(owner) = pool_owner {
-            pool_remove_entry(owner, &entry);
+            invalidate_pool_entry(owner, &entry);
         }
         false
     };
@@ -1005,7 +993,7 @@ pub(super) async fn prepare_codex_websocket(
     {
         drop(guard);
         if let Some(owner) = pool_owner {
-            pool_remove_entry(owner, &entry);
+            invalidate_pool_entry(owner, &entry);
         }
         return Err(if requires_origin {
             continuation_socket_missing_error()
@@ -1071,7 +1059,7 @@ pub(super) fn start_codex_websocket_events(
         if let Err(error) = guard.send(Message::Text(body_json)).await {
             drop(guard);
             if let Some(owner) = pool_owner {
-                pool_remove_entry(owner, &entry);
+                invalidate_pool_entry(owner, &entry);
             }
             socket_id_publisher.publish(None);
             let _ = tx
@@ -1096,7 +1084,7 @@ pub(super) fn start_codex_websocket_events(
                 .is_some_and(|reservation| pool_insert_for_turn(reservation, entry.clone()))
         } else {
             if let Some(owner) = pool_owner {
-                pool_remove_entry(owner, &entry);
+                invalidate_pool_entry(owner, &entry);
             }
             false
         };
@@ -1106,7 +1094,7 @@ pub(super) fn start_codex_websocket_events(
             && origin_reinserted
             && let Some(owner) = pool_owner
         {
-            pool_remove_entry(owner, &entry);
+            invalidate_pool_entry(owner, &entry);
         }
     });
     receiver
@@ -2386,31 +2374,6 @@ where
     (reusable, terminal_item)
 }
 
-fn headers_to_json(headers: &HeaderMap) -> serde_json::Value {
-    let mut out = serde_json::Map::new();
-    for (key, value) in headers.iter() {
-        out.insert(
-            key.to_string(),
-            serde_json::Value::String(value.to_str().unwrap_or("").to_string()),
-        );
-    }
-    serde_json::Value::Object(out)
-}
-
-fn summarize_json_request_size(body: &serde_json::Value, body_json: &str) -> serde_json::Value {
-    serde_json::json!({
-        "bytes": body_json.len(),
-        "inputCount": body
-            .get("input")
-            .and_then(|v| v.as_array())
-            .map(|items| items.len()),
-        "toolCount": body
-            .get("tools")
-            .and_then(|v| v.as_array())
-            .map(|items| items.len()),
-    })
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -3267,7 +3230,7 @@ mod tests {
 
         let replacement = Arc::new(PoolEntry::new(create_dummy_stream_async().await));
         pool_insert(owner.clone(), replacement.clone());
-        pool_remove_entry(&owner, &first);
+        invalidate_pool_entry(&owner, &first);
         let reservation = test_continuation(Some(owner.clone()), None, None, None);
         invalidate_codex_websocket_pool_socket(&reservation, Some(first.socket_id));
         assert!(Arc::ptr_eq(

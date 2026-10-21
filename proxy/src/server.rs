@@ -7,6 +7,7 @@ use crate::{
         request::{extract_model, parse_request},
         stream::openai_response as render_openai_response,
     },
+    paths::set_mode,
     project,
     provider::RequestContext,
     providers::codex::{
@@ -26,7 +27,7 @@ use crate::{
     },
     registry::{Registry, normalize_incoming_model},
     request_identity::{CLAUDE_AGENT_HEADER, CLAUDE_PARENT_AGENT_HEADER, ConversationIdentity},
-    session::{self, SessionState},
+    session,
     traffic::{TrafficCaptureOptions, create_traffic_capture},
 };
 use axum::{
@@ -43,7 +44,7 @@ use serde_json::{Map, Value, json};
 use std::fs::{self, File};
 use std::future::Future;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpListener;
@@ -1535,10 +1536,11 @@ async fn dispatch_request(
         }
     };
 
-    if let Some(project) = project::name_from_request(
-        body.extra.get("system"),
-        body.messages.iter().rev().map(|message| &message.content),
-    ) && let Some(monitor) = state.monitor.as_ref()
+    if let Some(monitor) = state.monitor.as_ref()
+        && let Some(project) = project::name_from_request(
+            body.extra.get("system"),
+            body.messages.iter().rev().map(|message| &message.content),
+        )
     {
         monitor.project_resolved(&req_id, project);
     }
@@ -2188,27 +2190,6 @@ fn current_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
-}
-
-fn set_mode(path: &Path, mode: u32) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(path) {
-            let mut perm = meta.permissions();
-            perm.set_mode(mode);
-            let _ = fs::set_permissions(path, perm);
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, mode);
-    }
-}
-
-#[allow(dead_code)]
-fn _unused(session_state: Option<&SessionState>) {
-    let _ = session_state;
 }
 
 #[cfg(test)]

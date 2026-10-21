@@ -1,12 +1,11 @@
 use serde_json::{Map, Value};
-use std::fs::{self, File, create_dir_all};
+use std::fs::{File, create_dir_all};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-use crate::config::AliasProvider;
 use crate::logging::REDACT_KEYS;
-use crate::paths;
+use crate::paths::{self, set_mode};
 use crate::providers::codex::translate::reasoning_signature::is_proxy_reasoning_signature;
 
 #[derive(Debug)]
@@ -152,28 +151,11 @@ pub(crate) fn test_capture(root: PathBuf) -> TrafficCapture {
 fn write_bytes(path: PathBuf, value: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         create_dir_all(parent)?;
-        if let Ok(meta) = fs::metadata(parent) {
-            set_mode(parent, 0o700);
-            if meta.is_dir() {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mut perm = meta.permissions();
-                    perm.set_mode(0o700);
-                    let _ = fs::set_permissions(parent, perm);
-                }
-            }
-        }
+        set_mode(parent, 0o700);
     }
     let mut out = File::create(&path)?;
     out.write_all(value)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perm = out.metadata()?.permissions();
-        perm.set_mode(0o600);
-        let _ = fs::set_permissions(&path, perm);
-    }
+    set_mode(&path, 0o600);
     Ok(())
 }
 
@@ -458,27 +440,6 @@ fn redact_traffic_value(value: &Value) -> Value {
         Value::Object(_) | Value::Array(_) => redact_traffic(value),
         _ => Value::String("[redacted]".to_string()),
     }
-}
-
-fn set_mode(path: &Path, mode: u32) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(path) {
-            let mut perm = meta.permissions();
-            perm.set_mode(mode);
-            let _ = fs::set_permissions(path, perm);
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, mode);
-    }
-}
-
-#[allow(dead_code)]
-fn _provider_alias(_provider: &str) -> Option<AliasProvider> {
-    None
 }
 
 #[cfg(test)]

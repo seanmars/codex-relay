@@ -6,9 +6,6 @@ struct IdTokenClaims {
     chatgpt_account_id: Option<String>,
     #[serde(default)]
     organizations: Option<Vec<OrgClaim>>,
-    #[allow(dead_code)]
-    #[serde(default)]
-    email: Option<String>,
     #[serde(default)]
     #[serde(rename = "https://api.openai.com/auth")]
     openai_auth: Option<OpenAiAuthClaim>,

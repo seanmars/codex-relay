@@ -603,10 +603,6 @@ pub fn opencode_base_url() -> String {
     resolve_opencode_config(&env, &paths::config_dir()).base_url
 }
 
-pub fn is_verbose() -> bool {
-    log_verbose()
-}
-
 pub fn kimi_oauth_host() -> String {
     let env: HashMap<_, _> = std::env::vars().collect();
     if let Some(raw) = env.get("CCP_KIMI_OAUTH_HOST") {

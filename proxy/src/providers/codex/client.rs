@@ -1240,7 +1240,9 @@ impl CodexHttpClient {
             }
 
             if !resp.status().is_success() {
-                let response = self.collect_http_response(resp, started_at, ctx).await?;
+                let response = self
+                    .collect_http_response(resp, started_at, ctx, "Codex")
+                    .await?;
                 let mut error = codex_status_error(response);
                 error.origin = CodexErrorOrigin::Http;
                 return Err(error);
@@ -2345,7 +2347,8 @@ impl CodexHttpClient {
         let (resp, started_at) = self
             .start_post_http(auth, body_json, ctx, use_responses_lite)
             .await?;
-        self.collect_http_response(resp, started_at, ctx).await
+        self.collect_http_response(resp, started_at, ctx, "Codex")
+            .await
     }
 
     async fn start_post_http(
@@ -2416,13 +2419,10 @@ impl CodexHttpClient {
         mut resp: reqwest::Response,
         started_at: Instant,
         ctx: &RequestContext,
+        label: &str,
     ) -> Result<CodexResponse, CodexError> {
         let status = resp.status().as_u16();
-        let headers: Vec<(String, String)> = resp
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
+        let headers = response_headers(&resp);
 
         let mut body_bytes = Vec::new();
         let mut response_started = false;
@@ -2435,7 +2435,7 @@ impl CodexHttpClient {
             .map_err(|_| CodexError {
                 status: 0,
                 message: format!(
-                    "Timed out waiting {}ms for the next Codex response body chunk",
+                    "Timed out waiting {}ms for the next {label} response body chunk",
                     self.body_idle_timeout_ms
                 ),
                 detail: Some("http_response_body".to_string()),
@@ -2445,7 +2445,7 @@ impl CodexHttpClient {
             })?
             .map_err(|e| CodexError {
                 status: 0,
-                message: format!("Transport error reading Codex response body: {e}"),
+                message: format!("Transport error reading {label} response body: {e}"),
                 detail: Some("http_response_body".to_string()),
                 retry_after: None,
                 usage_limit: None,
@@ -2500,7 +2500,7 @@ impl CodexHttpClient {
             request = request.header(key.as_str(), value.as_bytes());
         }
         let started_at = Instant::now();
-        let mut response = tokio::time::timeout(
+        let response = tokio::time::timeout(
             Duration::from_millis(self.header_timeout_ms),
             request.body(body_json.to_string()).send(),
         )
@@ -2525,66 +2525,8 @@ impl CodexHttpClient {
             origin: CodexErrorOrigin::Http,
         })?;
 
-        let status = response.status().as_u16();
-        let headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .map(|(key, value)| {
-                (
-                    key.to_string(),
-                    value.to_str().unwrap_or_default().to_string(),
-                )
-            })
-            .collect();
-        let mut body = Vec::new();
-        let mut response_started = false;
-        loop {
-            let chunk = tokio::time::timeout(
-                Duration::from_millis(self.body_idle_timeout_ms),
-                response.chunk(),
-            )
+        self.collect_http_response(response, started_at, ctx, "Codex search")
             .await
-            .map_err(|_| CodexError {
-                status: 0,
-                message: format!(
-                    "Timed out waiting {}ms for the next Codex search response body chunk",
-                    self.body_idle_timeout_ms
-                ),
-                detail: Some("http_response_body".to_string()),
-                retry_after: None,
-                usage_limit: None,
-                origin: CodexErrorOrigin::Http,
-            })?
-            .map_err(|e| CodexError {
-                status: 0,
-                message: format!("Transport error reading Codex search response body: {e}"),
-                detail: Some("http_response_body".to_string()),
-                retry_after: None,
-                usage_limit: None,
-                origin: CodexErrorOrigin::Http,
-            })?;
-            let Some(chunk) = chunk else {
-                break;
-            };
-            if !response_started {
-                if let Some(monitor) = ctx.monitor.as_ref() {
-                    monitor.generation_started(&ctx.req_id);
-                }
-                response_started = true;
-            }
-            body.extend_from_slice(&chunk);
-        }
-
-        if let Some(traffic) = ctx.traffic.as_deref() {
-            write_upstream_response_capture(traffic, status, started_at.elapsed(), &headers, &body);
-        }
-
-        Ok(CodexResponse {
-            body,
-            status,
-            headers,
-            transport: ActualTransport::Http,
-        })
     }
 }
 
@@ -2802,7 +2744,7 @@ fn write_codex_sse_event_capture(traffic: &TrafficCapture, body: &[u8]) {
     }
 }
 
-fn headers_to_json(headers: &http::HeaderMap) -> serde_json::Value {
+pub(super) fn headers_to_json(headers: &http::HeaderMap) -> serde_json::Value {
     let mut out = serde_json::Map::new();
     for (key, value) in headers.iter() {
         out.insert(
@@ -2821,7 +2763,10 @@ fn headers_to_json_from_pairs(headers: &[(String, String)]) -> serde_json::Value
     serde_json::Value::Object(out)
 }
 
-fn summarize_json_request_size(body: &serde_json::Value, body_json: &str) -> serde_json::Value {
+pub(super) fn summarize_json_request_size(
+    body: &serde_json::Value,
+    body_json: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "bytes": body_json.len(),
         "inputCount": body

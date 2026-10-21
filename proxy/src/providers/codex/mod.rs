@@ -333,13 +333,12 @@ impl CodexProvider {
             monitor.upstream_started(&ctx.req_id);
         }
         if want_stream {
-            let stream_request = translated.clone();
             let response = live_stream_response(
                 client,
                 message_id,
                 model,
                 ctx,
-                stream_request,
+                translated,
                 continuation,
                 LiveStreamCompaction {
                     compact_boundary,

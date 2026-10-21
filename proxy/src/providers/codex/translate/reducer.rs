@@ -5,9 +5,12 @@ use crate::providers::codex::events::{
 };
 
 use super::IncompleteResponsePolicy;
-use super::read_rewrite::sanitize_read_args;
+use super::read_rewrite::{
+    repair_whitespace_stalled_read_args, sanitize_read_args, should_buffer_tool_args,
+};
 use super::reasoning_signature::{PendingReasoning, ReasoningReplay, encode_reasoning_signature};
 use super::request::ResponsesInputItem;
+use super::web_search_compat::server_tool_use_id_from_codex_web_search_id;
 
 #[derive(Debug, Clone)]
 pub struct UpstreamStreamError {
@@ -66,8 +69,7 @@ pub const TERM_COMPLETED: &str = "response.completed";
 pub const TERM_INCOMPLETE: &str = "response.incomplete";
 pub const TERM_DONE: &str = "response.done";
 
-const BUFFERED_READ_REPAIR_TRAILING_WHITESPACE_BYTES: usize = 1_024;
-const BUFFERED_TOOL_MAX_ARGS_BYTES: usize = 5_000_000;
+pub(super) const BUFFERED_TOOL_MAX_ARGS_BYTES: usize = 5_000_000;
 
 #[derive(Debug, Clone)]
 pub enum ReducerEvent {
@@ -897,7 +899,7 @@ fn describe_open_blocks(
     out
 }
 
-fn parse_codex_usage(response: &serde_json::Value) -> CodexUsage {
+pub(super) fn parse_codex_usage(response: &serde_json::Value) -> CodexUsage {
     let usage = match response.get("usage") {
         Some(u) => u,
         None => return CodexUsage::default(),
@@ -916,79 +918,7 @@ fn parse_codex_usage(response: &serde_json::Value) -> CodexUsage {
     }
 }
 
-fn should_buffer_tool_args(name: &str) -> bool {
-    name == "Read"
-}
-
-fn repair_whitespace_stalled_read_args(
-    name: &str,
-    args: &str,
-    call_id: Option<&str>,
-) -> Option<String> {
-    if name != "Read" {
-        return None;
-    }
-    let trimmed = args.trim_end();
-    let trailing_whitespace = args.len().saturating_sub(trimmed.len());
-    if trailing_whitespace < BUFFERED_READ_REPAIR_TRAILING_WHITESPACE_BYTES {
-        return None;
-    }
-    parse_read_args_candidate(trimmed, call_id).or_else(|| {
-        let with_brace = format!("{trimmed}}}");
-        parse_read_args_candidate(&with_brace, call_id)
-    })
-}
-
-fn parse_read_args_candidate(args: &str, call_id: Option<&str>) -> Option<String> {
-    let parsed: serde_json::Value = serde_json::from_str(args).ok()?;
-    if !is_valid_read_args(&parsed) {
-        return None;
-    }
-    Some(sanitize_read_args(
-        "Read",
-        &serde_json::to_string(&parsed).ok()?,
-        call_id,
-    ))
-}
-
-fn is_valid_read_args(value: &serde_json::Value) -> bool {
-    let Some(obj) = value.as_object() else {
-        return false;
-    };
-    for key in obj.keys() {
-        if !matches!(key.as_str(), "file_path" | "offset" | "limit" | "pages") {
-            return false;
-        }
-    }
-    let Some(file_path) = obj.get("file_path").and_then(|v| v.as_str()) else {
-        return false;
-    };
-    if file_path.is_empty() {
-        return false;
-    }
-    if let Some(offset) = obj.get("offset").and_then(|v| v.as_i64())
-        && offset < 0
-    {
-        return false;
-    }
-    if let Some(limit) = obj.get("limit").and_then(|v| v.as_i64())
-        && limit <= 0
-    {
-        return false;
-    }
-    if obj.get("offset").is_some_and(|v| !v.is_i64()) {
-        return false;
-    }
-    if obj.get("limit").is_some_and(|v| !v.is_i64()) {
-        return false;
-    }
-    if obj.get("pages").is_some_and(|v| !v.is_string()) {
-        return false;
-    }
-    true
-}
-
-fn web_search_query(item: &serde_json::Value) -> String {
+pub(super) fn web_search_query(item: &serde_json::Value) -> String {
     let action = match item.get("action") {
         Some(v) => v,
         None => return String::new(),
@@ -1004,20 +934,6 @@ fn web_search_query(item: &serde_json::Value) -> String {
         }
     }
     String::new()
-}
-
-fn server_tool_use_id_from_codex_web_search_id(id: &str) -> String {
-    let suffix: String = id
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    format!("srvtoolu_{suffix}")
 }
 
 pub fn map_codex_usage_to_anthropic(

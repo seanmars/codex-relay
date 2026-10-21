@@ -4,7 +4,7 @@ use claude_code_proxy::{
     config, logging,
     monitor::MonitorHandle,
     paths,
-    registry::{ANTHROPIC_STYLE_ALIASES, Registry},
+    registry::Registry,
     server::{self, ServerConfig},
     tui::{self, MonitorExit, MonitorUiConfig},
 };
@@ -401,11 +401,6 @@ fn print_server_banner(bind_address: &str, port: u16, registry: &Registry) {
     println!("  export ANTHROPIC_MODEL=\"gpt-6-sol\"");
     println!("  export ANTHROPIC_SMALL_FAST_MODEL=\"gpt-6-luna\"");
     println!("  export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1");
-}
-
-#[allow(dead_code)]
-fn alias_names() -> usize {
-    ANTHROPIC_STYLE_ALIASES.len()
 }
 
 #[cfg(test)]
