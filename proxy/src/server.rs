@@ -21,9 +21,10 @@ use crate::{
             CodexNativeBackend, NativeResponseOutcome, openai_error, validate_native_request_model,
         },
         transcription::{
-            CodexTranscriptionBackend, MAX_TRANSCRIPTION_REQUEST_BYTES, TranscriptionRequestError,
-            prepare_transcription, transcription_error_response,
+            CodexTranscriptionBackend, MAX_TRANSCRIPTION_REQUEST_BYTES, PreparedTranscription,
+            TranscriptionRequestError, prepare_transcription, transcription_error_response,
         },
+        translate::request::{CodexOverrides, resolve_request_effort},
     },
     registry::{Registry, normalize_incoming_model},
     request_identity::{CLAUDE_AGENT_HEADER, CLAUDE_PARENT_AGENT_HEADER, ConversationIdentity},
@@ -106,6 +107,21 @@ fn apply_auto_review_model(
     };
     body.model = Some(route.override_model.clone());
     Some(route)
+}
+
+/// The effort a messages request sends upstream, for the monitor. Codex
+/// passes its config overrides, so the effort override and the compaction
+/// cap apply; other providers send the client's effort. Like chat, `none`
+/// reports as no effort.
+fn messages_upstream_effort(
+    body: &crate::anthropic::schema::MessagesRequest,
+    codex_overrides: Option<&CodexOverrides>,
+) -> Option<String> {
+    resolve_request_effort(body, codex_overrides)
+        .ok()
+        .flatten()
+        .map(|effort| effort.to_string())
+        .filter(|effort| effort != "none")
 }
 
 pub struct ServerConfig {
@@ -454,7 +470,7 @@ async fn handler_transcription(State(state): State<Arc<AppState>>, req: Request<
         );
         return monitor_response_body(response, request_guard);
     }
-    let mut multipart = match Multipart::from_request(req, &()).await {
+    let multipart = match Multipart::from_request(req, &()).await {
         Ok(multipart) => multipart,
         Err(error) => {
             let status = axum::response::IntoResponse::into_response(error).status();
@@ -487,81 +503,7 @@ async fn handler_transcription(State(state): State<Arc<AppState>>, req: Request<
             return monitor_response_body(response, request_guard);
         }
     };
-    let mut audio = None;
-    let mut filename = None;
-    let mut audio_content_type = None;
-    let mut language = None;
-    while let Some(field) = match multipart.next_field().await {
-        Ok(field) => field,
-        Err(_) => {
-            let response = transcription_error_response(TranscriptionRequestError::invalid(
-                "Invalid multipart transcription request",
-                None,
-            ));
-            return monitor_response_body(response, request_guard);
-        }
-    } {
-        let name = field.name().unwrap_or_default().to_string();
-        match name.as_str() {
-            "file" => {
-                if audio.is_some() {
-                    let response =
-                        transcription_error_response(TranscriptionRequestError::invalid(
-                            "Transcription request must contain one 'file' field",
-                            Some("file"),
-                        ));
-                    return monitor_response_body(response, request_guard);
-                }
-                filename = field.file_name().map(str::to_string);
-                audio_content_type = field.content_type().map(str::to_string);
-                audio = match field.bytes().await {
-                    Ok(bytes) => Some(bytes),
-                    Err(_) => {
-                        let response =
-                            transcription_error_response(TranscriptionRequestError::invalid(
-                                "Failed to read uploaded audio",
-                                Some("file"),
-                            ));
-                        return monitor_response_body(response, request_guard);
-                    }
-                };
-            }
-            "language" => {
-                language = match multipart_text(field, "language").await {
-                    Ok(value) => Some(value),
-                    Err(error) => {
-                        return monitor_response_body(
-                            transcription_error_response(TranscriptionRequestError {
-                                status: error.status,
-                                message: error.message,
-                                param: error.param,
-                                code: error.code.unwrap_or("invalid_multipart"),
-                            }),
-                            request_guard,
-                        );
-                    }
-                };
-            }
-            "model" => {
-                if multipart_text(field, "model").await.is_err() {
-                    let response =
-                        transcription_error_response(TranscriptionRequestError::invalid(
-                            "Invalid multipart 'model' field",
-                            Some("model"),
-                        ));
-                    return monitor_response_body(response, request_guard);
-                }
-            }
-            _ => {
-                let response = transcription_error_response(TranscriptionRequestError::invalid(
-                    format!("Unsupported multipart field '{name}'"),
-                    None,
-                ));
-                return monitor_response_body(response, request_guard);
-            }
-        }
-    }
-    let prepared = match prepare_transcription(audio, filename, audio_content_type, language) {
+    let prepared = match parse_multipart_transcription(multipart).await {
         Ok(prepared) => prepared,
         Err(error) => {
             let response = transcription_error_response(error);
@@ -779,6 +721,64 @@ async fn dispatch_image_request(
     monitor_response_body(response, request_guard)
 }
 
+async fn parse_multipart_transcription(
+    mut multipart: Multipart,
+) -> Result<PreparedTranscription, TranscriptionRequestError> {
+    let mut audio = None;
+    let mut filename = None;
+    let mut audio_content_type = None;
+    let mut language = None;
+    while let Some(field) = multipart.next_field().await.map_err(|_| {
+        TranscriptionRequestError::invalid("Invalid multipart transcription request", None)
+    })? {
+        let name = field.name().unwrap_or_default().to_string();
+        match name.as_str() {
+            "file" => {
+                if audio.is_some() {
+                    return Err(TranscriptionRequestError::invalid(
+                        "Transcription request must contain one 'file' field",
+                        Some("file"),
+                    ));
+                }
+                filename = field.file_name().map(str::to_string);
+                audio_content_type = field.content_type().map(str::to_string);
+                audio = Some(field.bytes().await.map_err(|_| {
+                    TranscriptionRequestError::invalid(
+                        "Failed to read uploaded audio",
+                        Some("file"),
+                    )
+                })?);
+            }
+            "language" => {
+                let value = multipart_text(field, "language").await.map_err(|error| {
+                    TranscriptionRequestError {
+                        status: error.status,
+                        message: error.message,
+                        param: error.param,
+                        code: error.code.unwrap_or("invalid_multipart"),
+                    }
+                })?;
+                language = Some(value);
+            }
+            "model" => {
+                multipart_text(field, "model").await.map_err(|_| {
+                    TranscriptionRequestError::invalid(
+                        "Invalid multipart 'model' field",
+                        Some("model"),
+                    )
+                })?;
+            }
+            _ => {
+                return Err(TranscriptionRequestError::invalid(
+                    format!("Unsupported multipart field '{name}'"),
+                    None,
+                ));
+            }
+        }
+    }
+    prepare_transcription(audio, filename, audio_content_type, language)
+}
+
 async fn parse_multipart_image_edit(
     mut multipart: Multipart,
 ) -> Result<crate::providers::codex::images::PreparedImageRequest, ImageRequestError> {
@@ -924,7 +924,18 @@ async fn handler_responses(State(state): State<Arc<AppState>>, req: Request<Body
     };
     let (requested_model, normalized_model) = match extract_model(&body) {
         Ok(model) => model,
-        Err(error) => return monitor_response_body(error.response(), request_guard),
+        Err(error) => {
+            let response = error.response();
+            log_native_request_completed(
+                &log,
+                &req_id,
+                "responses",
+                None,
+                response.status(),
+                started_at,
+            );
+            return monitor_response_body(response, request_guard);
+        }
     };
     let now = current_millis();
     let session_state = session::existing_session(session_id.as_deref(), now);
@@ -943,10 +954,27 @@ async fn handler_responses(State(state): State<Arc<AppState>>, req: Request<Body
             Some("model"),
         )
         .response();
+        log_native_request_completed(
+            &log,
+            &req_id,
+            "responses",
+            Some(&normalized_model),
+            response.status(),
+            started_at,
+        );
         return monitor_response_body(response, request_guard);
     };
     let parsed = if provider.name() == "codex" {
         if let Err(response) = validate_native_request_model(&body) {
+            log_routed_openai_request_completed(
+                &log,
+                &req_id,
+                "responses",
+                provider.name(),
+                Some(&normalized_model),
+                response.status(),
+                started_at,
+            );
             return monitor_response_body(response, request_guard);
         }
         None
@@ -958,7 +986,19 @@ async fn handler_responses(State(state): State<Arc<AppState>>, req: Request<Body
             session_id.as_deref(),
         ) {
             Ok(parsed) => Some(parsed),
-            Err(error) => return monitor_response_body(error.response(), request_guard),
+            Err(error) => {
+                let response = error.response();
+                log_routed_openai_request_completed(
+                    &log,
+                    &req_id,
+                    "responses",
+                    provider.name(),
+                    Some(&normalized_model),
+                    response.status(),
+                    started_at,
+                );
+                return monitor_response_body(response, request_guard);
+            }
         }
     };
     if provider.name() != "codex"
@@ -1156,7 +1196,18 @@ async fn handler_chat_completions(
     };
     let (requested_model, normalized_model) = match extract_model(&body) {
         Ok(model) => model,
-        Err(error) => return monitor_response_body(error.response(), request_guard),
+        Err(error) => {
+            let response = error.response();
+            log_native_request_completed(
+                &log,
+                &req_id,
+                "chat_completions",
+                None,
+                response.status(),
+                started_at,
+            );
+            return monitor_response_body(response, request_guard);
+        }
     };
     let now = current_millis();
     let session_state = session::existing_session(session_id.as_deref(), now);
@@ -1175,25 +1226,44 @@ async fn handler_chat_completions(
             Some("model"),
         )
         .response();
+        log_native_request_completed(
+            &log,
+            &req_id,
+            "chat_completions",
+            Some(&normalized_model),
+            response.status(),
+            started_at,
+        );
         return monitor_response_body(response, request_guard);
     };
-    let (translated, parsed) = if provider.name() == "codex" {
-        let translated = match translate_request(body.clone()) {
-            Ok(translated) => translated,
-            Err(error) => return monitor_response_body(error.response(), request_guard),
-        };
-        (Some(translated), None)
+    let translated_or_parsed = if provider.name() == "codex" {
+        translate_request(body.clone())
+            .map(|translated| (Some(translated), None))
+            .map_err(|error| error.response())
     } else {
-        let parsed = match parse_request(
+        parse_request(
             OpenAiSurface::ChatCompletions,
             body.clone(),
             provider.name(),
             session_id.as_deref(),
-        ) {
-            Ok(parsed) => parsed,
-            Err(error) => return monitor_response_body(error.response(), request_guard),
-        };
-        (None, Some(parsed))
+        )
+        .map(|parsed| (None, Some(parsed)))
+        .map_err(|error| error.response())
+    };
+    let (translated, parsed) = match translated_or_parsed {
+        Ok(pair) => pair,
+        Err(response) => {
+            log_routed_openai_request_completed(
+                &log,
+                &req_id,
+                "chat_completions",
+                provider.name(),
+                Some(&normalized_model),
+                response.status(),
+                started_at,
+            );
+            return monitor_response_body(response, request_guard);
+        }
     };
     if provider.name() != "codex"
         && let Some(session_id) = session_id.as_deref()
@@ -1445,6 +1515,7 @@ async fn dispatch_request(
         .headers()
         .get("x-claude-code-session-id")
         .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
         .map(std::string::ToString::to_string);
     if let Some(monitor) = state.monitor.as_ref() {
         monitor.request_started(&req_id, session_id.clone(), None, endpoint);
@@ -1701,10 +1772,8 @@ async fn dispatch_request(
         crate::providers::codex::clear_session_compaction(session_id);
     }
 
-    let effort = crate::providers::translate_shared::read_effort(&body)
-        .ok()
-        .flatten()
-        .map(str::to_string);
+    let codex_overrides = (provider.name() == "codex").then(CodexOverrides::from_config);
+    let effort = messages_upstream_effort(&body, codex_overrides.as_ref());
     let current = session::record_session_request_with_affinity_update(
         session_id.as_deref(),
         session_state.as_ref(),
@@ -2253,6 +2322,59 @@ mod request_id_header_tests {
         assert_eq!(
             stamped.headers().get(REQUEST_ID_HEADER).unwrap(),
             "upstream-owned"
+        );
+    }
+}
+
+#[cfg(test)]
+mod messages_effort_tests {
+    use super::{CodexOverrides, messages_upstream_effort};
+    use crate::anthropic::schema::MessagesRequest;
+    use crate::monitor::{EndpointKind, MonitorHandle};
+    use serde_json::json;
+
+    fn request(effort: &str) -> MessagesRequest {
+        serde_json::from_value(json!({
+            "model": "gpt-5.6-sol",
+            "messages": [{"role": "user", "content": "hello"}],
+            "output_config": {"effort": effort}
+        }))
+        .unwrap()
+    }
+
+    fn effort_override(effort: &str) -> CodexOverrides {
+        CodexOverrides {
+            effort: Some(effort.to_string()),
+            ..CodexOverrides::default()
+        }
+    }
+
+    #[test]
+    fn monitor_sees_the_codex_effort_override() {
+        let monitor = MonitorHandle::new(10);
+        monitor.request_started("request", None, None, EndpointKind::Messages);
+        let effort = messages_upstream_effort(&request("low"), Some(&effort_override("high")));
+        monitor.provider_selected("request", "codex", "gpt-5.6-sol", effort);
+
+        assert_eq!(monitor.snapshot().active[0].effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn effort_without_codex_overrides_is_the_clients() {
+        assert_eq!(
+            messages_upstream_effort(&request("low"), Some(&CodexOverrides::default())).as_deref(),
+            Some("low")
+        );
+        assert_eq!(
+            messages_upstream_effort(&request("low"), None).as_deref(),
+            Some("low")
+        );
+    }
+
+    #[test]
+    fn none_effort_override_reports_no_effort() {
+        assert!(
+            messages_upstream_effort(&request("high"), Some(&effort_override("none"))).is_none()
         );
     }
 }

@@ -284,10 +284,10 @@ pub(crate) fn to_codex_effort(effort: Option<&str>) -> Option<Effort> {
 /// config.json, nor the process env that config tests used to change.
 #[derive(Debug, Default)]
 pub(crate) struct CodexOverrides {
-    effort: Option<String>,
-    service_tier: Option<String>,
-    reasoning_summary: Option<String>,
-    compact_effort: Option<String>,
+    pub(crate) effort: Option<String>,
+    pub(crate) service_tier: Option<String>,
+    pub(crate) reasoning_summary: Option<String>,
+    pub(crate) compact_effort: Option<String>,
 }
 
 impl CodexOverrides {
@@ -405,6 +405,26 @@ fn compact_effort_cap_from(raw: Option<&str>) -> Option<Effort> {
     }
 }
 
+/// The effort a translated request sends upstream: the config's effort
+/// override wins over the request's, and a compaction request takes the
+/// cap. `codex_config` is None for OpenAI-compatible upstreams, which send
+/// the request's effort as is.
+pub(crate) fn resolve_request_effort(
+    req: &MessagesRequest,
+    codex_config: Option<&CodexOverrides>,
+) -> Result<Option<Effort>, anyhow::Error> {
+    let effort = to_codex_effort(read_effort(req)?);
+    let Some(config) = codex_config else {
+        return Ok(effort);
+    };
+    let effort = resolve_effort_override(effort, config.effort.as_deref())?;
+    if is_compact_messages_request(req) {
+        let cap = compact_effort_cap_from(config.compact_effort.as_deref());
+        return Ok(apply_compact_effort_cap(effort, cap));
+    }
+    Ok(effort)
+}
+
 const VALID_SERVICE_TIERS: &[&str] = &["fast", "priority", "ultrafast", "flex"];
 
 fn normalize_service_tier(tier: &str) -> Result<ServiceTier, anyhow::Error> {
@@ -508,7 +528,6 @@ fn translate_request_inner(
     codex_config: Option<&CodexOverrides>,
 ) -> Result<ResponsesRequest, anyhow::Error> {
     let instructions = flatten_system_text(req.extra.get("system"));
-    let is_compact = is_compact_messages_request(req);
     let input = build_input(req);
     let tools = read_tools(req)?;
     let tool_choice = map_tool_choice(req)?;
@@ -609,18 +628,7 @@ fn translate_request_inner(
         }
     }
 
-    let effort = read_effort(req)?;
-    let codex_effort = to_codex_effort(effort);
-    let mut resolved_effort = match codex_config {
-        Some(config) => resolve_effort_override(codex_effort, config.effort.as_deref())?,
-        None => codex_effort,
-    };
-    if let Some(config) = codex_config
-        && is_compact
-    {
-        let cap = compact_effort_cap_from(config.compact_effort.as_deref());
-        resolved_effort = apply_compact_effort_cap(resolved_effort, cap);
-    }
+    let resolved_effort = resolve_request_effort(req, codex_config)?;
     let wants_reasoning = reasoning_requested(resolved_effort.as_ref());
     if resolved_effort.is_some() || opts.use_responses_lite {
         let summary = if wants_reasoning
