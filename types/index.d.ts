@@ -19,6 +19,9 @@ export type Health = {
   ok: true
   pid: number
   version: string
+  // The config dir the relay serves, as it resolves it and as it was given; absent on 0.1.0 (configDir only)
+  configDir?: string
+  configDirArg?: string
   port: number
   inflight: number
   defaultRoute: Route
