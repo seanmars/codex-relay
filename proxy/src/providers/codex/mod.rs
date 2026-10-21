@@ -6,6 +6,7 @@ pub mod continuation;
 pub mod count_tokens;
 pub(crate) mod events;
 pub mod images;
+pub mod models;
 pub mod native;
 pub mod request_summary;
 pub mod search;
@@ -1693,6 +1694,43 @@ pub fn print_usage(json: bool) -> Result<(), anyhow::Error> {
             .map_err(|err| anyhow::anyhow!("Codex usage response has an unknown shape: {err}"))?;
         print!("{}", usage::format_usage(&parsed, (now_ms() / 1000) as i64));
     }
+    Ok(())
+}
+
+/// `claude-code-proxy models`: the Codex models the signed-in account may
+/// use, as the Codex backend lists them, beside what the proxy routes.
+pub fn print_models(json: bool, full: bool) -> Result<(), anyhow::Error> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let client_version = models::client_version();
+    let url = models::models_url(
+        &config::codex_base_url(self::auth::constants::CODEX_API_ENDPOINT),
+        &client_version,
+    );
+    let body = runtime.block_on(async {
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(30))
+            .build()?;
+        let manager = CodexAuthManager::new(file_store());
+        let user_agent =
+            config::codex_user_agent(&format!("claude-code-proxy/{}", env!("CARGO_PKG_VERSION")));
+        models::fetch_models(&client, &url, &user_agent, &manager).await
+    })?;
+    if json {
+        let value: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|err| anyhow::anyhow!("Codex models response is not JSON: {err}"))?;
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+    let parsed: models::CodexModels = serde_json::from_str(&body)
+        .map_err(|err| anyhow::anyhow!("Codex models response has an unknown shape: {err}"))?;
+    println!("Codex models for this account (client_version {client_version}):");
+    print!(
+        "{}",
+        models::format_models(&parsed, registry::CODEX_MODELS, full)
+    );
     Ok(())
 }
 

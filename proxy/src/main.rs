@@ -48,8 +48,15 @@ enum Commands {
     Demo,
     /// List supported provider models
     Models {
+        /// Also list the models the account hides from pickers
         #[arg(long)]
         full: bool,
+        /// Print the raw JSON of the account's model list
+        #[arg(long)]
+        json: bool,
+        /// Only list the models this proxy routes; ask nothing of Codex
+        #[arg(long)]
+        local: bool,
     },
     /// Manage Codex authentication and show usage limits
     Codex {
@@ -193,8 +200,20 @@ fn main() -> Result<()> {
             tui::run_attached_monitor(|| monitor.snapshot(), url.to_string())?;
             Ok(())
         }
-        Commands::Models { full } => {
-            print_models(&Registry::with_default_alias(), full);
+        Commands::Models { full, json, local } => {
+            if local {
+                print_models(&Registry::with_default_alias(), full);
+                return Ok(());
+            }
+            if let Err(err) = claude_code_proxy::providers::codex::print_models(json, full) {
+                // The proxy's own list still answers what it routes
+                eprintln!("Could not read this account's Codex models: {err}");
+                if json {
+                    std::process::exit(2);
+                }
+                println!("Models this proxy routes:");
+                print_models(&Registry::with_default_alias(), full);
+            }
             Ok(())
         }
         Commands::Codex { command } => match command {

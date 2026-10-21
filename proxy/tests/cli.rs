@@ -30,13 +30,34 @@ fn version_aliases_print_expected_version() -> Result<(), Box<dyn std::error::Er
 #[test]
 fn models_prints_only_codex() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = Command::cargo_bin("claude-code-proxy")?;
-    cmd.arg("models");
+    cmd.args(["models", "--local"]);
     let out = String::from_utf8(cmd.output()?.stdout)?;
     assert!(out.contains("codex:"), "{out}");
     for removed in ["kimi:", "grok:", "opencode:", "cursor:"] {
         assert!(!out.contains(removed), "{removed} in {out}");
     }
+    Ok(())
+}
 
+#[test]
+fn models_without_sign_in_falls_back_to_the_proxy_list() -> Result<(), Box<dyn std::error::Error>> {
+    // No sign-in in a fresh config dir, and an address nothing answers on
+    let temp = tempfile::TempDir::new()?;
+    let output = Command::cargo_bin("claude-code-proxy")?
+        .arg("models")
+        .env("CCP_CONFIG_DIR", temp.path())
+        .env("CCP_CODEX_AUTH_SOURCE", "proxy")
+        .env("CCP_CODEX_BASE_URL", "http://127.0.0.1:9/codex/responses")
+        .output()?;
+    assert!(output.status.success());
+    let err = String::from_utf8(output.stderr)?;
+    assert!(
+        err.contains("Could not read this account's Codex models"),
+        "{err}"
+    );
+    let out = String::from_utf8(output.stdout)?;
+    assert!(out.contains("Models this proxy routes:"), "{out}");
+    assert!(out.contains("codex:"), "{out}");
     Ok(())
 }
 
