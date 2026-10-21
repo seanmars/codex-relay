@@ -134,13 +134,16 @@ export function sessionRoute(state, cfg, sid) {
   return { route: pinned ? pinned.route : cfg.defaultRoute, pinned: Boolean(pinned) }
 }
 
-// Picks this session out of the proxy's /monitor answer
+// Picks this session out of the proxy's /monitor answer. `model` is the proxy's display text; the status line
+// reads `requestedModel` and `resolvedModel`, which a proxy without them leaves null.
 export function sessionStats(monitor, sid) {
   const sessions = monitor && monitor.snapshot && Array.isArray(monitor.snapshot.sessions) ? monitor.snapshot.sessions : []
   const s = sid ? sessions.find((x) => x && x.session_id === sid) : undefined
   if (!s) return null
   return {
     model: s.model || null,
+    requestedModel: s.requested_model || null,
+    resolvedModel: s.resolved_model || null,
     effort: s.effort || null,
     requests: s.request_count || 0,
     failures: s.failure_count || 0,

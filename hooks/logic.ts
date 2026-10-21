@@ -1,5 +1,5 @@
 // Pure helpers for the hooks module: no engine calls, so tests run them directly
-import type { Health, Route, Usage, UsageWindow } from '../types'
+import type { CodexStats, Health, Route, Usage, UsageWindow } from '../types'
 
 export type LocalCfg = { port: number; proxyPort: number; proxyCommand: string; agentModel: string; nodePath: string }
 
@@ -97,8 +97,14 @@ export function windowLabel(w: UsageWindow): string {
 
 const usageWindows = (u: Usage) => [u.primary, u.secondary].filter((w): w is UsageWindow => w !== null)
 
-// The monitor names an alias's model as `opus → gpt-6-sol`: the model that answered is the last part
-export const answeringModel = (model: string | null) => (model ? (model.split('→').at(-1) ?? model).trim() : '')
+// The model that answered this session, or the one it asked for until the proxy resolves it. A relay or proxy
+// without the structured fields sends only the display text `opus → gpt-6-sol`, whose last part answered.
+export function answeringModel(c: CodexStats | null): string {
+  if (!c) return ''
+  const structured = c.resolvedModel || c.requestedModel
+  if (structured) return structured
+  return c.model ? (c.model.split('→').at(-1) ?? c.model).trim() : ''
+}
 
 function resetIn(w: UsageWindow, nowSec: number): string {
   if (!w.resetAt) return ''
@@ -122,7 +128,7 @@ function statusBody(h: Health | null, contextPercent?: number): string {
   if (h.session.route === 'claude') return h.defaultRoute === 'codex' ? 'Claude (此視窗) · 新 session 預設 Codex' : 'Claude'
   if (h.proxy.error && !h.proxy.up) return `Codex: proxy 無法啟動 (${h.proxy.error.slice(0, 60)})`
   const c = h.session.codex
-  const parts = [`Codex ${answeringModel(c?.model ?? null)}`.trim()]
+  const parts = [`Codex ${answeringModel(c)}`.trim()]
   if (contextPercent !== undefined) parts.push(`ctx ${Math.round(contextPercent)}%`)
   if (h.usage) {
     const windows = usageWindows(h.usage).map((w) => `${windowLabel(w)} ${pct(w)}`)

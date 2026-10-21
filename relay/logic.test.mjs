@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import * as L from './logic.mjs'
+import contract from '../proxy/tests/fixtures/model-contract.mjs'
 
 const cfg = (over = {}) => ({ ...L.parseConfig(''), ...over })
 
@@ -96,6 +97,8 @@ test('sessionStats and usageSummary read the proxy answers', () => {
   const monitor = { version: 1, snapshot: { sessions: [{ session_id: 'sid', model: 'gpt-6-sol', request_count: 3, input_tokens: 1200, output_tokens: 80, last_status: 'ok' }] } }
   assert.deepEqual(L.sessionStats(monitor, 'sid'), {
     model: 'gpt-6-sol',
+    requestedModel: null,
+    resolvedModel: null,
     effort: null,
     requests: 3,
     failures: 0,
@@ -111,4 +114,10 @@ test('sessionStats and usageSummary read the proxy answers', () => {
   })
   assert.deepEqual(usage, { plan: 'pro', allowed: true, primary: { usedPercent: 23.4, windowSeconds: 18000, resetAt: 5 }, secondary: null })
   assert.equal(L.usageSummary({}), null)
+})
+
+test('sessionStats turns the monitor model fields of the shared contract into its session.codex fields', () => {
+  // The proxy and hook tests pin the two ends of the same file, so a renamed field fails a test
+  const stats = L.sessionStats(contract.monitor, contract.sessionId)
+  assert.deepEqual({ model: stats.model, requestedModel: stats.requestedModel, resolvedModel: stats.resolvedModel }, contract.codex)
 })

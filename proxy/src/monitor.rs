@@ -142,7 +142,11 @@ pub struct ActiveRequest {
     pub session_seq: Option<u64>,
     pub project: Option<String>,
     pub provider: Option<String>,
+    // Display text for the TUI: `requested → resolved` when they differ. Clients
+    // that need the model read `requested_model` and `resolved_model` instead.
     pub model: Option<String>,
+    pub requested_model: Option<String>,
+    pub resolved_model: Option<String>,
     pub effort: Option<String>,
     pub endpoint: EndpointKind,
     pub started_at: SystemTime,
@@ -185,6 +189,8 @@ pub struct CompletedRequest {
     pub project: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub requested_model: Option<String>,
+    pub resolved_model: Option<String>,
     pub effort: Option<String>,
     pub endpoint: EndpointKind,
     pub started_at: SystemTime,
@@ -258,6 +264,8 @@ pub struct SessionSummary {
     pub failure_count: usize,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub requested_model: Option<String>,
+    pub resolved_model: Option<String>,
     pub effort: Option<String>,
     pub last_seen: SystemTime,
     pub input_tokens: u64,
@@ -520,6 +528,8 @@ impl MonitorStore {
                         project: None,
                         provider: None,
                         model: None,
+                        requested_model: None,
+                        resolved_model: None,
                         effort: None,
                         endpoint,
                         started_at: SystemTime::now(),
@@ -563,6 +573,7 @@ impl MonitorStore {
             } => {
                 if let Some(active) = self.active.get_mut(&request_id) {
                     active.provider = Some(provider);
+                    active.requested_model = Some(model.clone());
                     active.model = Some(model);
                     active.effort = effort;
                     active.status = RequestStatus::ProviderSelected;
@@ -570,11 +581,12 @@ impl MonitorStore {
             }
             MonitorEvent::ModelResolved { request_id, model } => {
                 if let Some(active) = self.active.get_mut(&request_id) {
-                    active.model = Some(match active.model.take() {
+                    active.model = Some(match active.requested_model.as_deref() {
                         Some(incoming) if incoming != model => format!("{incoming} → {model}"),
-                        Some(incoming) => incoming,
-                        None => model,
+                        Some(incoming) => incoming.to_string(),
+                        None => model.clone(),
                     });
+                    active.resolved_model = Some(model);
                 }
             }
             MonitorEvent::CompactionStarted { request_id } => {
@@ -792,6 +804,8 @@ impl MonitorStore {
                 project: None,
                 provider: None,
                 model: None,
+                requested_model: None,
+                resolved_model: None,
                 effort: None,
                 endpoint: EndpointKind::Messages,
                 started_at: SystemTime::now(),
@@ -825,6 +839,8 @@ impl MonitorStore {
             project: active.project,
             provider: active.provider,
             model: active.model,
+            requested_model: active.requested_model,
+            resolved_model: active.resolved_model,
             effort: active.effort,
             endpoint: active.endpoint,
             started_at: active.started_at,
@@ -955,6 +971,8 @@ fn session_summaries(
                 failure_count: 0,
                 provider: None,
                 model: None,
+                requested_model: None,
+                resolved_model: None,
                 effort: None,
                 last_seen: request.finished_at,
                 input_tokens: 0,
@@ -970,7 +988,12 @@ fn session_summaries(
         }
         entry.project = request.project.clone().or(entry.project.clone());
         entry.provider = request.provider.clone().or(entry.provider.clone());
-        entry.model = request.model.clone().or(entry.model.clone());
+        // The model fields move together so the pair always names one request
+        if request.model.is_some() {
+            entry.model = request.model.clone();
+            entry.requested_model = request.requested_model.clone();
+            entry.resolved_model = request.resolved_model.clone();
+        }
         entry.effort = request.effort.clone().or(entry.effort.clone());
         entry.last_seen = max_system_time(entry.last_seen, request.finished_at);
         if let (Some(tokens), Some(duration)) = (
@@ -999,6 +1022,8 @@ fn session_summaries(
                 failure_count: 0,
                 provider: None,
                 model: None,
+                requested_model: None,
+                resolved_model: None,
                 effort: None,
                 last_seen: request.started_at,
                 input_tokens: 0,
@@ -1012,7 +1037,12 @@ fn session_summaries(
         entry.request_count += 1;
         entry.project = request.project.clone().or(entry.project.clone());
         entry.provider = request.provider.clone().or(entry.provider.clone());
-        entry.model = request.model.clone().or(entry.model.clone());
+        // The model fields move together so the pair always names one request
+        if request.model.is_some() {
+            entry.model = request.model.clone();
+            entry.requested_model = request.requested_model.clone();
+            entry.resolved_model = request.resolved_model.clone();
+        }
         entry.effort = request.effort.clone().or(entry.effort.clone());
         entry.last_seen = max_system_time(entry.last_seen, request.started_at);
         if let (Some(tokens), Some(duration)) = (
@@ -1185,6 +1215,27 @@ mod tests {
             state.active[0].model.as_deref(),
             Some("claude-sonnet-4-6 → gpt-5.4")
         );
+        assert_eq!(
+            state.active[0].requested_model.as_deref(),
+            Some("claude-sonnet-4-6")
+        );
+        assert_eq!(state.active[0].resolved_model.as_deref(), Some("gpt-5.4"));
+    }
+
+    #[test]
+    fn session_model_pair_comes_from_one_request() {
+        let monitor = MonitorHandle::new(10);
+        monitor.request_started("r1", Some("s1".to_string()), None, EndpointKind::Messages);
+        monitor.provider_selected("r1", "codex", "sonnet", None);
+        monitor.model_resolved("r1", "gpt-5.4");
+        monitor.request_completed("r1", 200, None, None);
+        monitor.request_started("r2", Some("s1".to_string()), None, EndpointKind::Messages);
+        monitor.provider_selected("r2", "codex", "opus", None);
+
+        let session = &monitor.snapshot().sessions[0];
+        assert_eq!(session.model.as_deref(), Some("opus"));
+        assert_eq!(session.requested_model.as_deref(), Some("opus"));
+        assert_eq!(session.resolved_model, None);
     }
 
     #[test]
@@ -1381,6 +1432,8 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input
             project: None,
             provider: Some("codex".to_string()),
             model: Some("gpt-5.6-sol".to_string()),
+            requested_model: Some("gpt-5.6-sol".to_string()),
+            resolved_model: Some("gpt-5.6-sol".to_string()),
             effort: None,
             endpoint: EndpointKind::Messages,
             started_at: SystemTime::UNIX_EPOCH,

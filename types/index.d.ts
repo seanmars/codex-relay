@@ -1,7 +1,11 @@
 export type Route = 'claude' | 'codex'
 
 export type CodexStats = {
+  // Display text, `opus → gpt-6-sol` when an alias resolves to another model
   model: string | null
+  // The model the session asked for and the model that answered; absent from a relay before these fields
+  requestedModel?: string | null
+  resolvedModel?: string | null
   effort: string | null
   requests: number
   failures: number

@@ -99,6 +99,8 @@ pub struct ActiveSnapshot {
     pub project: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub requested_model: Option<String>,
+    pub resolved_model: Option<String>,
     pub effort: Option<String>,
     pub endpoint: EndpointKind,
     pub started_at: SystemTime,
@@ -136,6 +138,8 @@ impl From<ActiveRequest> for ActiveSnapshot {
             project: value.project,
             provider: value.provider,
             model: value.model,
+            requested_model: value.requested_model,
+            resolved_model: value.resolved_model,
             effort: value.effort,
             endpoint: value.endpoint,
             started_at: value.started_at,
@@ -162,6 +166,8 @@ pub struct CompletedSnapshot {
     pub project: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub requested_model: Option<String>,
+    pub resolved_model: Option<String>,
     pub effort: Option<String>,
     pub endpoint: EndpointKind,
     pub started_at: SystemTime,
@@ -197,6 +203,8 @@ impl From<CompletedRequest> for CompletedSnapshot {
             project: value.project,
             provider: value.provider,
             model: value.model,
+            requested_model: value.requested_model,
+            resolved_model: value.resolved_model,
             effort: value.effort,
             endpoint: value.endpoint,
             started_at: value.started_at,
@@ -226,6 +234,8 @@ pub struct SessionSnapshot {
     pub failure_count: usize,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub requested_model: Option<String>,
+    pub resolved_model: Option<String>,
     pub effort: Option<String>,
     pub last_seen: SystemTime,
     pub input_tokens: u64,
@@ -253,6 +263,8 @@ impl From<SessionSummary> for SessionSnapshot {
             failure_count: value.failure_count,
             provider: value.provider,
             model: value.model,
+            requested_model: value.requested_model,
+            resolved_model: value.resolved_model,
             effort: value.effort,
             last_seen: value.last_seen,
             input_tokens: value.input_tokens,
@@ -309,6 +321,52 @@ mod tests {
         assert_eq!(decoded.recent[0].http_status, Some(200));
     }
 
+    // The status line hook reads these fields through the relay; the relay and hook tests import the same file
+    const MODEL_CONTRACT: &str = include_str!("../../tests/fixtures/model-contract.mjs");
+
+    // Every field the fixture names must be in `actual` with the same value; other fields are free
+    fn assert_json_subset(expected: &serde_json::Value, actual: &serde_json::Value, path: &str) {
+        match expected {
+            serde_json::Value::Object(fields) => {
+                for (key, value) in fields {
+                    let field = actual
+                        .get(key)
+                        .unwrap_or_else(|| panic!("{path}.{key} is missing in {actual}"));
+                    assert_json_subset(value, field, &format!("{path}.{key}"));
+                }
+            }
+            serde_json::Value::Array(items) => {
+                let actual_items = actual
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{path} is not an array"));
+                assert_eq!(actual_items.len(), items.len(), "{path} length");
+                for (index, (item, actual_item)) in items.iter().zip(actual_items).enumerate() {
+                    assert_json_subset(item, actual_item, &format!("{path}[{index}]"));
+                }
+            }
+            _ => assert_eq!(actual, expected, "{path}"),
+        }
+    }
+
+    #[test]
+    fn monitor_response_names_requested_and_resolved_model_separately() {
+        let monitor = MonitorHandle::default();
+        monitor.request_started(
+            "r-contract",
+            Some("sid-contract".into()),
+            Some(1),
+            EndpointKind::Messages,
+        );
+        monitor.provider_selected("r-contract", "codex", "opus", None);
+        monitor.model_resolved("r-contract", "gpt-6-sol");
+
+        let actual = serde_json::to_value(MonitorResponse::from(monitor.snapshot())).unwrap();
+        let (_, contract) = MODEL_CONTRACT.split_once("export default").unwrap();
+        let contract: serde_json::Value = serde_json::from_str(contract).unwrap();
+
+        assert_json_subset(&contract["monitor"], &actual, "$");
+    }
+
     #[test]
     fn snapshot_deserialization_accepts_legacy_and_newer_fields() {
         let snapshot: MonitorSnapshot = MonitorHandle::default().snapshot().into();
@@ -324,5 +382,24 @@ mod tests {
             .insert("future_field".into(), serde_json::json!(true));
         let decoded: MonitorSnapshot = serde_json::from_value(newer).unwrap();
         assert_eq!(decoded.snapshot_at, snapshot.snapshot_at);
+    }
+
+    #[test]
+    fn session_from_a_proxy_without_model_fields_decodes_them_as_absent() {
+        let monitor = MonitorHandle::default();
+        monitor.request_started("r1", Some("s1".into()), None, EndpointKind::Messages);
+        monitor.provider_selected("r1", "codex", "opus", None);
+        let mut legacy = serde_json::to_value(MonitorSnapshot::from(monitor.snapshot())).unwrap();
+        for list in ["sessions", "active"] {
+            let entry = legacy[list][0].as_object_mut().unwrap();
+            entry.remove("requested_model");
+            entry.remove("resolved_model");
+        }
+
+        let decoded: MonitorSnapshot = serde_json::from_value(legacy).unwrap();
+
+        assert_eq!(decoded.sessions[0].model.as_deref(), Some("opus"));
+        assert_eq!(decoded.sessions[0].requested_model, None);
+        assert_eq!(decoded.active[0].resolved_model, None);
     }
 }
