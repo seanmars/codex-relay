@@ -2088,7 +2088,7 @@ mod tests {
         use http_body_util::BodyExt as _;
 
         let body = request_with_tools(serde_json::json!([]));
-        let request_body = translate_request(
+        let request_body = translate::request::translate_request_with_overrides(
             &body,
             TranslateOptions {
                 session_id: None,
@@ -2096,6 +2096,7 @@ mod tests {
                 model: "gpt-5.6-sol".to_string(),
                 use_responses_lite: true,
             },
+            &translate::request::CodexOverrides::default(),
         )
         .unwrap();
         let ctx = RequestContext {

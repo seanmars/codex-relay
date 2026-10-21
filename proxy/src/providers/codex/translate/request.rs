@@ -279,8 +279,26 @@ pub(crate) fn to_codex_effort(effort: Option<&str>) -> Option<Effort> {
     }
 }
 
-fn resolve_effort(effort: Option<Effort>) -> Result<Option<Effort>, anyhow::Error> {
-    resolve_effort_override(effort, config::codex_effort().as_deref())
+/// The config values a Codex translation applies. They come in as one value,
+/// so tests pass the defaults and never read the developer's shell or
+/// config.json, nor the process env that config tests used to change.
+#[derive(Debug, Default)]
+pub(crate) struct CodexOverrides {
+    effort: Option<String>,
+    service_tier: Option<String>,
+    reasoning_summary: Option<String>,
+    compact_effort: Option<String>,
+}
+
+impl CodexOverrides {
+    pub(crate) fn from_config() -> Self {
+        Self {
+            effort: config::codex_effort(),
+            service_tier: config::codex_service_tier(),
+            reasoning_summary: config::codex_reasoning_summary(),
+            compact_effort: std::env::var("CCP_COMPACT_EFFORT").ok(),
+        }
+    }
 }
 
 pub(crate) fn resolve_effort_override(
@@ -357,19 +375,6 @@ pub(crate) fn is_compact_messages_request(request: &MessagesRequest) -> bool {
         })
 }
 
-/// Reasoning-effort cap applied to compaction requests, or None when the
-/// fast path is disabled. Summarization is extraction, not problem solving:
-/// native Claude Code compacts without extended thinking, so burning
-/// medium/high reasoning on a 200k-token summary only adds latency. The cap
-/// never raises effort — a request already below it is left alone.
-///
-/// A request naming no effort at all also takes the cap. Left unset it would
-/// run at the upstream default, which is the effort level the cap exists to
-/// avoid.
-fn compact_effort_cap() -> Option<Effort> {
-    compact_effort_cap_from(std::env::var("CCP_COMPACT_EFFORT").ok().as_deref())
-}
-
 /// Applies the cap to a request's resolved effort. A missing effort takes
 /// the cap; an explicit effort at or below it is preserved.
 fn apply_compact_effort_cap(resolved: Option<Effort>, cap: Option<Effort>) -> Option<Effort> {
@@ -380,6 +385,16 @@ fn apply_compact_effort_cap(resolved: Option<Effort>, cap: Option<Effort>) -> Op
     }
 }
 
+/// Reasoning-effort cap applied to compaction requests, from
+/// `CCP_COMPACT_EFFORT`, or None when the fast path is disabled.
+/// Summarization is extraction, not problem solving: native Claude Code
+/// compacts without extended thinking, so burning medium/high reasoning on a
+/// 200k-token summary only adds latency. The cap never raises effort — a
+/// request already below it is left alone.
+///
+/// A request naming no effort at all also takes the cap. Left unset it would
+/// run at the upstream default, which is the effort level the cap exists to
+/// avoid.
 fn compact_effort_cap_from(raw: Option<&str>) -> Option<Effort> {
     match raw {
         None | Some("") => Some(Effort::Low),
@@ -401,13 +416,6 @@ fn normalize_service_tier(tier: &str) -> Result<ServiceTier, anyhow::Error> {
             VALID_SERVICE_TIERS.join(", ")
         ),
     }
-}
-
-fn resolve_service_tier(
-    model_tier: Option<ServiceTier>,
-    model: &str,
-) -> Result<Option<ServiceTier>, anyhow::Error> {
-    pick_service_tier(config::codex_service_tier().as_deref(), model_tier, model)
 }
 
 /// The configured override wins over the tier implied by the model name. Either
@@ -463,7 +471,15 @@ pub fn translate_request(
     req: &MessagesRequest,
     opts: TranslateOptions,
 ) -> Result<ResponsesRequest, anyhow::Error> {
-    translate_request_inner(req, opts, true)
+    translate_request_with_overrides(req, opts, &CodexOverrides::from_config())
+}
+
+pub(crate) fn translate_request_with_overrides(
+    req: &MessagesRequest,
+    opts: TranslateOptions,
+    overrides: &CodexOverrides,
+) -> Result<ResponsesRequest, anyhow::Error> {
+    translate_request_inner(req, opts, Some(overrides))
 }
 
 pub fn translate_openai_compatible_request(
@@ -479,14 +495,16 @@ pub fn translate_openai_compatible_request(
             model,
             use_responses_lite: false,
         },
-        false,
+        None,
     )
 }
 
+/// `codex_config` is None for OpenAI-compatible upstreams, which take none
+/// of the Codex config.
 fn translate_request_inner(
     req: &MessagesRequest,
     opts: TranslateOptions,
-    apply_codex_config: bool,
+    codex_config: Option<&CodexOverrides>,
 ) -> Result<ResponsesRequest, anyhow::Error> {
     let instructions = flatten_system_text(req.extra.get("system"));
     let is_compact = is_compact_messages_request(req);
@@ -579,8 +597,12 @@ fn translate_request_inner(
         out.prompt_cache_key = Some(sid);
     }
 
-    if apply_codex_config {
-        let service_tier = resolve_service_tier(opts.service_tier, &out.model)?;
+    if let Some(config) = codex_config {
+        let service_tier = pick_service_tier(
+            config.service_tier.as_deref(),
+            opts.service_tier,
+            &out.model,
+        )?;
         if let Some(ref tier) = service_tier {
             out.service_tier = Some(tier.clone());
         }
@@ -588,20 +610,22 @@ fn translate_request_inner(
 
     let effort = read_effort(req)?;
     let codex_effort = to_codex_effort(effort);
-    let mut resolved_effort = if apply_codex_config {
-        resolve_effort(codex_effort)?
-    } else {
-        codex_effort
+    let mut resolved_effort = match codex_config {
+        Some(config) => resolve_effort_override(codex_effort, config.effort.as_deref())?,
+        None => codex_effort,
     };
-    if apply_codex_config && is_compact {
-        resolved_effort = apply_compact_effort_cap(resolved_effort, compact_effort_cap());
+    if let Some(config) = codex_config
+        && is_compact
+    {
+        let cap = compact_effort_cap_from(config.compact_effort.as_deref());
+        resolved_effort = apply_compact_effort_cap(resolved_effort, cap);
     }
     let wants_reasoning = reasoning_requested(resolved_effort.as_ref());
     if resolved_effort.is_some() || opts.use_responses_lite {
         let summary = if wants_reasoning
-            && (!apply_codex_config
-                || reasoning_summary_requested(config::codex_reasoning_summary().as_deref()))
-        {
+            && codex_config.is_none_or(|config| {
+                reasoning_summary_requested(config.reasoning_summary.as_deref())
+            }) {
             Some("auto".to_string())
         } else {
             None
@@ -1224,6 +1248,15 @@ mod tests {
         }
     }
 
+    // Without the config's overrides, so the developer's shell and config.json
+    // cannot change what these tests assert
+    fn translate(
+        req: &MessagesRequest,
+        opts: TranslateOptions,
+    ) -> Result<ResponsesRequest, anyhow::Error> {
+        translate_request_with_overrides(req, opts, &CodexOverrides::default())
+    }
+
     #[test]
     fn service_tier_override_values_normalize_to_wire_tiers() {
         for (value, tier, wire) in [
@@ -1346,7 +1379,7 @@ mod tests {
                 "tool_choice": tool_choice
             }))
             .unwrap();
-            let wire = serde_json::to_value(translate_request(&req, opts()).unwrap()).unwrap();
+            let wire = serde_json::to_value(translate(&req, opts()).unwrap()).unwrap();
 
             assert_eq!(wire["tool_choice"], expected_choice);
             assert_eq!(wire["parallel_tool_calls"], expected_parallel);
@@ -1369,7 +1402,7 @@ mod tests {
         }))
         .unwrap();
         let wire = serde_json::to_value(
-            translate_request(
+            translate(
                 &req,
                 TranslateOptions {
                     model: "gpt-5.6-luna".to_string(),
@@ -1398,7 +1431,7 @@ mod tests {
             "tool_choice": {"type":"tool", "name":"web_search"}
         }))
         .unwrap();
-        let out = translate_request(
+        let out = translate(
             &req,
             TranslateOptions {
                 session_id: Some("s".into()),
@@ -1442,7 +1475,7 @@ mod tests {
             "tool_choice": {"type":"auto"}
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         let ResponsesTool::WebSearch(tool) = &out.tools.as_ref().unwrap()[0] else {
             panic!("expected web_search tool");
         };
@@ -1474,7 +1507,7 @@ mod tests {
             "tool_choice": {"type":"tool", "name":"web_search"}
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         let ResponsesTool::WebSearch(tool) = &out.tools.as_ref().unwrap()[0] else {
             panic!("expected web_search tool");
         };
@@ -1506,7 +1539,7 @@ mod tests {
                 body["tool_choice"] = tool_choice;
             }
             let req: MessagesRequest = serde_json::from_value(body).unwrap();
-            let out = translate_request(&req, opts()).unwrap();
+            let out = translate(&req, opts()).unwrap();
             let ResponsesTool::WebSearch(tool) = &out.tools.as_ref().unwrap()[0] else {
                 panic!("expected web_search tool");
             };
@@ -1553,7 +1586,7 @@ mod tests {
             "tool_choice": {"type":"tool", "name":"web_search"}
         }))
         .unwrap();
-        let out = translate_request(
+        let out = translate(
             &req,
             TranslateOptions {
                 session_id: None,
@@ -1586,7 +1619,7 @@ mod tests {
             "tool_choice": {"type":"tool", "name":"web_search"}
         }))
         .unwrap();
-        let out = translate_request(
+        let out = translate(
             &req,
             TranslateOptions {
                 session_id: None,
@@ -1643,10 +1676,10 @@ mod tests {
             .unwrap()
             .remove("pattern");
 
-        let normal = translate_request(&req, opts()).unwrap();
+        let normal = translate(&req, opts()).unwrap();
         let compatible =
             translate_openai_compatible_request(&req, "gpt-5.5".to_string(), None).unwrap();
-        let lite = translate_request(
+        let lite = translate(
             &req,
             TranslateOptions {
                 use_responses_lite: true,
@@ -1773,7 +1806,7 @@ mod tests {
             }]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         let tools = out.tools.as_ref().unwrap();
         let ResponsesTool::Function(tool) = &tools[0] else {
             panic!("expected function tool");
@@ -1826,7 +1859,7 @@ mod tests {
             }]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         let tools = out.tools.as_ref().unwrap();
         let ResponsesTool::Function(tool) = &tools[0] else {
             panic!("expected function tool");
@@ -1854,7 +1887,7 @@ mod tests {
             "messages": [{"role":"user", "content":"hello"}]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert!(out.reasoning.is_none());
         assert!(out.include.is_none());
     }
@@ -1867,7 +1900,7 @@ mod tests {
             "output_config": {"effort": "medium"}
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         let reasoning = out.reasoning.unwrap();
         assert!(matches!(reasoning.effort, Some(Effort::Medium)));
         assert_eq!(reasoning.summary.as_deref(), Some("auto"));
@@ -1885,7 +1918,7 @@ mod tests {
             "output_config": {"effort": "max"}
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert!(matches!(out.reasoning.unwrap().effort, Some(Effort::Max)));
     }
 
@@ -2052,7 +2085,7 @@ mod tests {
             "output_config": {"effort": "medium"}
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert!(matches!(out.reasoning.unwrap().effort, Some(Effort::Low)));
     }
 
@@ -2066,7 +2099,7 @@ mod tests {
             "output_config": {"effort": "low"}
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert!(matches!(out.reasoning.unwrap().effort, Some(Effort::Low)));
     }
 
@@ -2079,7 +2112,7 @@ mod tests {
             "output_config": {"effort": "high"}
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert!(matches!(out.reasoning.unwrap().effort, Some(Effort::High)));
     }
 
@@ -2100,7 +2133,7 @@ mod tests {
             "messages": [{"role":"user", "content":"hello"}]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         let value = serde_json::to_value(out).unwrap();
         assert!(value.get("max_output_tokens").is_none());
     }
@@ -2113,7 +2146,7 @@ mod tests {
             "output_config": {"effort": "xhigh"}
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert!(matches!(out.reasoning.unwrap().effort, Some(Effort::Xhigh)));
         assert_eq!(
             out.include,
@@ -2140,7 +2173,7 @@ mod tests {
             ]}]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert_eq!(out.input.len(), 1);
         if let ResponsesInputItem::Message { role, content } = &out.input[0] {
             assert_eq!(role, "user");
@@ -2160,7 +2193,7 @@ mod tests {
             ]}]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert_eq!(out.input.len(), 2);
     }
 
@@ -2179,7 +2212,7 @@ mod tests {
             }}
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         if let Some(ResponsesTextFormat::JsonSchema { schema, .. }) = &out.text.format {
             let required = schema.get("required").and_then(|v| v.as_array()).unwrap();
             assert!(required.iter().any(|v| v == "ok"));
@@ -2200,7 +2233,7 @@ mod tests {
             }]}]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert_eq!(out.input.len(), 1);
         if let ResponsesInputItem::FunctionCallOutput { call_id, output } = &out.input[0] {
             assert_eq!(call_id, "tu_1");
@@ -2230,7 +2263,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert_eq!(out.input.len(), 2);
         if let ResponsesInputItem::FunctionCallOutput { output, .. } = &out.input[1] {
             let output = output.as_text().expect("text tool output");
@@ -2263,7 +2296,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert_eq!(out.input.len(), 2);
         if let ResponsesInputItem::FunctionCallOutput { output, .. } = &out.input[1] {
             assert_eq!(
@@ -2299,7 +2332,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert_eq!(out.input.len(), 2);
         if let ResponsesInputItem::FunctionCallOutput { output, .. } = &out.input[1] {
             let output = output.as_text().expect("text tool output");
@@ -2331,7 +2364,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert_eq!(out.input.len(), 2);
         if let ResponsesInputItem::FunctionCallOutput { output, .. } = &out.input[1] {
             assert_eq!(
@@ -2363,7 +2396,7 @@ mod tests {
         }))
         .unwrap();
 
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert_eq!(
             serde_json::to_value(&out.input[0]).unwrap(),
             json!({
@@ -2469,7 +2502,7 @@ mod tests {
         }))
         .unwrap();
 
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         assert_eq!(
             serde_json::to_value(&out.input[0]).unwrap()["output"],
             json!([
@@ -2502,7 +2535,7 @@ mod tests {
             "output_config": {"effort": "high"}
         }))
         .unwrap();
-        let out = translate_request(
+        let out = translate(
             &req,
             TranslateOptions {
                 model: "gpt-5.6-luna".to_string(),
@@ -2522,7 +2555,7 @@ mod tests {
             "output_config": {"effort": "high"}
         }))
         .unwrap();
-        let out = translate_request(
+        let out = translate(
             &req,
             TranslateOptions {
                 model: "gpt-5.6-sol".to_string(),
@@ -2543,7 +2576,7 @@ mod tests {
             "tools": [{"name":"test","input_schema":{"type":"object"}}]
         }))
         .unwrap();
-        let out = translate_request(
+        let out = translate(
             &req,
             TranslateOptions {
                 model: "gpt-5.6-luna".to_string(),
@@ -2576,7 +2609,7 @@ mod tests {
             "messages": [{"role":"user", "content":"hello"}]
         }))
         .unwrap();
-        let out = translate_request(
+        let out = translate(
             &req,
             TranslateOptions {
                 model: "gpt-5.6-luna".to_string(),
@@ -2600,7 +2633,7 @@ mod tests {
             "output_config": {"effort": "medium"}
         }))
         .unwrap();
-        let out = translate_request(
+        let out = translate(
             &req,
             TranslateOptions {
                 model: "gpt-5.6-luna".to_string(),
@@ -2622,7 +2655,7 @@ mod tests {
             "tool_choice": {"type":"tool", "name":"test"}
         }))
         .unwrap();
-        let out = translate_request(
+        let out = translate(
             &req,
             TranslateOptions {
                 model: "gpt-5.4".to_string(),
@@ -2666,7 +2699,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let out = translate_request(&req, opts()).unwrap();
+        let out = translate(&req, opts()).unwrap();
         let reasoning_index = out
             .input
             .iter()
