@@ -1,0 +1,5 @@
+{
+  "name": "codex-relay",
+  "owner": { "name": "seanmars" },
+  "plugins": [{ "name": "codex-relay", "source": "./" }]
+}
