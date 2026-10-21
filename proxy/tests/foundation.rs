@@ -232,7 +232,7 @@ fn config_env_precedence_and_defaults() {
         "CCP_CONFIG_DIR".to_string(),
         config.path().to_string_lossy().into_owned(),
     )]);
-    assert_eq!(load_config_for_env(&env).port, 18765);
+    assert_eq!(load_config_for_env(&env).port, 8970);
 
     env.insert("PORT".to_string(), "19999".to_string());
     assert_eq!(load_config_for_env(&env).port, 19999);

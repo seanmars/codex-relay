@@ -164,7 +164,7 @@ fn load_config_from_env(env: &HashMap<String, String>, config_dir: PathBuf) -> L
 
     let mut out = LoadedConfig {
         bind_address: "127.0.0.1".to_string(),
-        port: 18765,
+        port: 8970,
         alias_provider: AliasProvider::Codex,
         log_verbose: false,
         log_stderr: false,
