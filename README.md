@@ -154,15 +154,64 @@ Codex 的設定放在 `codex` 物件中. 同名的 `CCP_CODEX_*` 環境變數優
 
 `authSource` 也可以用 `claude-code-proxy codex auth source [proxy|codex-cli]` 查看或設定. 其他欄位請參考 claude-code-proxy 文件.
 
-### Relay CLI
+## 命令列工具
 
-Relay 也可以直接操作:
+不透過 Claude Code 時, 可以直接用下面的指令操作 relay 和 proxy.
+
+### Relay: `node relay/cli.mjs`
+
+在 repo 根目錄執行 `node relay/cli.mjs <指令>`. 設定目錄是 `CLAUDE_CONFIG_DIR`, 沒有設定時是 `~/.claude`.
+
+| 指令 | 說明 |
+|---|---|
+| `start` | 在背景啟動 relay. Relay 已經在執行時, 只顯示它的 pid 和版本. 10 秒內沒有回應時回傳錯誤 |
+| `stop [--proxy]` | 停止 relay. `--proxy` 一併停止 proxy |
+| `stop-proxy` | 只停止 proxy, relay 繼續執行 |
+| `restart [--proxy] [--if-stale] [--if-idle]` | 先停止再啟動 relay. `--proxy` 一併停止 proxy. `--if-stale` 只在執行中的 relay 版本比這份程式舊時重啟. `--if-idle` 在 relay 處理 request 時不重啟, exit code 是 `3` |
+| `status [--json]` | 顯示設定檔, 預設路由, relay, proxy 和 Codex 方案用量. Relay 沒有執行時 exit code 是 `1`. `--json` 印出 `/__health` 的原始回應 |
+| `default [claude\|codex]` | 沒有參數時, 印出新 session 的預設路由. 有參數時, 把它寫入 `codex-relay.json` |
+| `config` | 印出目前生效的設定 (已合併預設值) |
+| `wait [seconds]` | 等待 relay 回應, 最多等 `seconds` 秒 (預設 `10`). Relay 回應時 exit code 是 `0`, 逾時是 `1` |
+
+範例:
 
 ```sh
-node relay/cli.mjs start | stop [--proxy] | restart [--proxy] | status [--json] | default [claude|codex] | config
+node relay/cli.mjs status
+node relay/cli.mjs default codex
+node relay/cli.mjs restart --proxy
 ```
 
-`config` 印出目前生效的設定.
+- `stop-proxy` 先要求 proxy 自己結束. 舊版 proxy 沒有這個功能時, 改用 port 找出 process 並結束它. 只有 process 名稱符合 `proxyCommand` 時才會結束.
+- Port 上的 relay 屬於另一個 `CLAUDE_CONFIG_DIR` 時, `start`, `stop` 和 `restart` 不操作它, 並回傳錯誤.
+
+### Proxy: `claude-code-proxy`
+
+沒有指令時, 等於執行 `serve`. 沒有 `--port` 時, port 依序讀取環境變數 `PORT`, `config.json` 的 `port`, 預設是 `8970`.
+
+| 指令 | 說明 |
+|---|---|
+| `serve [--port <port>] [--no-monitor]` | 啟動 proxy. stdout 是終端機時, 同時開啟 monitor TUI. 使用 `--no-monitor` 或 stdout 不是終端機時, 只印出啟動資訊 |
+| `stop [--port <port>]` | 停止執行中的 proxy. 進行中的 request 最多再執行 10 秒. 指令會等到 process 結束才返回 |
+| `monitor [--url <url>]` | 連到執行中的 proxy, 開啟唯讀的 monitor TUI. 預設 URL 是 `http://127.0.0.1:<port>` |
+| `models [--full] [--json] [--local]` | 列出帳號可用的 Codex model. `--full` 也列出 hidden model. `--json` 印出原始 JSON. `--local` 只列出 proxy 支援的 model, 不連到 Codex |
+| `codex auth login` | 開啟瀏覽器登入 ChatGPT |
+| `codex auth device` | 用裝置碼登入 ChatGPT. 適合沒有瀏覽器的環境 |
+| `codex auth status` | 顯示登入的帳號, token 到期時間和儲存位置. 沒有登入時 exit code 是 `1` |
+| `codex auth logout` | 刪除儲存的登入資料 |
+| `codex auth source [proxy\|codex-cli]` | 沒有參數時, 顯示目前使用的登入來源. 有參數時, 把它寫入 `config.json` |
+| `codex usage [--json]` | 顯示 Codex 方案的用量上限. `--json` 印出原始 JSON |
+| `version` · `-v` · `--version` | 印出版本 |
+
+`authSource` 是 `codex-cli` 時, `login`, `device` 和 `logout` 改為執行 Codex CLI 的 `codex login`, `codex login --device-auth` 和 `codex logout`.
+
+範例:
+
+```sh
+claude-code-proxy serve --port 8970 --no-monitor
+claude-code-proxy models --full
+claude-code-proxy codex auth source proxy
+claude-code-proxy codex usage
+```
 
 ## 檔案
 
