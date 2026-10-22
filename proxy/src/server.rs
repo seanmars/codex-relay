@@ -303,6 +303,7 @@ pub fn app_with_features(
         chat_completions,
         images,
         transcriptions,
+        codex_auth_source: crate::config::codex_auth_source(),
     });
     let router = Router::new()
         .route("/healthz", get(healthz))
@@ -348,6 +349,9 @@ struct AppState {
     chat_completions: Option<Arc<ChatCompletionsBackend>>,
     images: Option<Arc<CodexImagesBackend>>,
     transcriptions: Option<Arc<CodexTranscriptionBackend>>,
+    /// The sign-in source the Codex clients read, picked once when they were
+    /// built. A later `codex auth source` change applies only after a restart.
+    codex_auth_source: crate::config::CodexAuthSource,
 }
 
 // `claude-code-proxy stop` asks the proxy to exit. Only a local program may: a browser page's request carries
@@ -427,10 +431,20 @@ async fn handler_monitor(
 
 /// Liveness, and the Codex model and effort the config forces on every
 /// request (null when unset), so a client can show what an agent will run on
-/// before its first request.
-async fn healthz() -> Json<serde_json::Value> {
+/// before its first request. `authSource` is the sign-in this proxy reads;
+/// `configuredAuthSource` is the one the config names now, which a restart
+/// would read. A client warns when they differ.
+async fn healthz(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     let codex = crate::config::codex_request_config();
-    Json(json!({ "ok": true, "codex": { "model": codex.model, "effort": codex.effort } }))
+    Json(json!({
+        "ok": true,
+        "codex": {
+            "model": codex.model,
+            "effort": codex.effort,
+            "authSource": state.codex_auth_source.as_str(),
+            "configuredAuthSource": crate::config::codex_auth_source().as_str(),
+        }
+    }))
 }
 
 #[derive(serde::Deserialize)]

@@ -392,6 +392,10 @@ async fn healthz_returns_ok() {
     // The config's Codex overrides: their values depend on this machine's env and config.json
     let codex = body["codex"].as_object().expect("codex overrides");
     assert!(codex.contains_key("model") && codex.contains_key("effort"));
+    // Both sign-in sources are named, and agree while the config is unchanged
+    let source = codex["authSource"].as_str().expect("authSource");
+    assert!(["proxy", "codex-cli"].contains(&source), "{source}");
+    assert_eq!(codex["configuredAuthSource"], codex["authSource"]);
 }
 
 #[tokio::test]
