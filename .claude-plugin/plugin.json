@@ -1,6 +1,6 @@
 {
   "name": "codex-relay",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Route each Claude Code window to Claude or to OpenAI Codex (signed in with Codex CLI), with a status line for the Codex session",
   "author": { "name": "seanmars" },
   "types": "./types/index.d.ts"
