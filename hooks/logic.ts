@@ -1,5 +1,5 @@
 // Pure helpers for the hooks module: no engine calls, so tests run them directly
-import type { AgentCodexStats, CodexStats, Health, Route, Subagent, Subagents, Usage, UsageWindow } from '../types'
+import type { AgentCodexStats, CodexStats, Health, ProxyOverrides, Route, Subagent, Subagents, Usage, UsageWindow } from '../types'
 
 export type LocalCfg = { port: number; proxyPort: number; proxyCommand: string; agentModel: string; nodePath: string }
 
@@ -68,23 +68,60 @@ export const relayIsStale = (h: Health, pluginVersion: string) =>
 export const AGENT_NAME = 'codex'
 export const AGENT_TYPE = `codex-relay:${AGENT_NAME}`
 
-export function agentSpec(model: string) {
+// A null effort leaves it to each spawn, which gives the agent the main conversation's
+export function agentSpec(model: string, effort: string | null = null) {
   return {
     name: AGENT_NAME,
-    description: `General-purpose agent that runs on OpenAI Codex (${model}) through codex-relay. Same full toolset as the default Agent tool.`,
+    description: `General-purpose agent that runs on OpenAI Codex (${model}) through codex-relay. Same full toolset as the default Agent tool. Pass a gpt-* model to run it on another Codex model.`,
     prompt:
       "You are an agent for Claude Code, Anthropic's official CLI for Claude. Given the user's message, use the available tools to complete the task fully and report your findings and changes clearly and concisely.",
     model,
+    ...(effort ? { effort } : {}),
   }
 }
 
+// Foreground colours only, each ended by the default foreground (39), not a full reset: the task keeps its own dim
+const MODEL_COLOR = '\x1b[36m'
+const EFFORT_COLOR = '\x1b[35m'
+const FG_DEFAULT = '\x1b[39m'
+
+export function modelEffortLabel(model: string | null | undefined, effort: string | null | undefined): string {
+  const parts = [model && `${MODEL_COLOR}${model}${FG_DEFAULT}`, effort && `${EFFORT_COLOR}${effort}${FG_DEFAULT}`]
+  return parts.filter(Boolean).join(' · ')
+}
+
 // What an Agent row shows after its description. Codex's answer wins over what Claude Code asked for: the proxy may
-// map the model to another and override the effort.
+// map the model to another and override the effort. Uncoloured: the engine refuses a row rewrite with an escape
+// sequence.
 export function subagentLabel(s: Subagent | undefined): string {
   if (!s) return ''
   const model = s.codex ? `Codex ${s.codex.resolvedModel || s.codex.requestedModel || ''}`.trim() : s.model
   const effort = s.codex ? s.codex.effort : s.effort
   return [model, effort].filter(Boolean).join(' · ')
+}
+
+// The description a Codex agent's task shows as, under the prompt. Written once, at the spawn.
+export const spawnDescription = (description: string, model: string, effort: string | null) =>
+  `${description} · ${modelEffortLabel(model, effort)}`
+
+// The relay sends a model id that starts with `gpt-` to Codex, whatever the session's route
+export const isCodexModel = (model: string) => /^gpt-/i.test(model)
+
+export type CodexSpawn = { model: string; effort: string | null; shownModel: string; shownEffort: string | null }
+
+// What a codex-relay:codex spawn runs on, decided before it starts so its task can show it. The call's own Codex model,
+// else agentModel: a Claude model there would send the agent to Claude. The configured effort, else the main
+// conversation's. The proxy's forced values win over both, so the task shows those.
+export function codexSpawn(
+  callModel: string | undefined,
+  agentModel: string,
+  agentEffort: string | null,
+  mainEffort: string | null,
+  overrides: ProxyOverrides | null | undefined,
+): CodexSpawn {
+  const model = callModel && isCodexModel(callModel) ? callModel : agentModel
+  const effort = agentEffort ?? mainEffort
+  return { model, effort, shownModel: overrides?.model || model, shownEffort: overrides?.effort || effort }
 }
 
 // `all` itself when nothing changed: each write redraws every Agent row
@@ -213,6 +250,7 @@ export const HELP = [
   '/relay                      開啟面板',
   '/relay codex | claude       切換這個視窗 (只影響這個 session)',
   '/relay default [codex|claude]  查看或設定新 session 的預設路由',
+  '/relay effort [low|medium|high|xhigh|max|auto]  查看或設定 codex-relay:codex agent 的 effort (auto 與主對話相同)',
   '/relay status               顯示路由, proxy 與 Codex 用量',
   '/relay usage                顯示 Codex 方案的用量上限',
   '/relay models [--full]      列出帳號可用的 Codex model 與 proxy 支援狀況',
@@ -223,7 +261,7 @@ export const HELP = [
   '/relay help                 列出所有指令',
 ].join('\n')
 
-export const COMMAND_WORDS = ['panel', 'codex', 'claude', 'default', 'status', 'usage', 'models', 'auth', 'monitor', 'start', 'restart', 'stop-proxy', 'help']
+export const COMMAND_WORDS = ['panel', 'codex', 'claude', 'default', 'effort', 'status', 'usage', 'models', 'auth', 'monitor', 'start', 'restart', 'stop-proxy', 'help']
 
 export function parseArgs(args: string): { cmd: string; rest: string[] } {
   const [cmd = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)

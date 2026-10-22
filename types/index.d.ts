@@ -21,6 +21,8 @@ export type UsageWindow = { usedPercent: number; windowSeconds: number; resetAt:
 
 export type Usage = { plan: string | null; allowed: boolean; primary: UsageWindow | null; secondary: UsageWindow | null }
 
+export type ProxyOverrides = { model: string | null; effort: string | null }
+
 // The relay's GET /__health answer
 export type Health = {
   ok: true
@@ -33,10 +35,14 @@ export type Health = {
   inflight: number
   defaultRoute: Route
   agentModel: string
+  // null leaves it to Claude Code; absent from a relay before it
+  agentEffort?: string | null
   pinnedSessions: number
   // `agents` is keyed by the subagent's id; absent from a relay before it
   session: { sid: string; route: Route; pinned: boolean; codex: CodexStats | null; agents?: Record<string, AgentCodexStats> }
-  proxy: { port: number; command: string; up: boolean; startedPid: number | null; error: string | null }
+  // `overrides`: what the proxy's config forces on every Codex request; null from a proxy that does not say, absent
+  // from a relay before it
+  proxy: { port: number; command: string; up: boolean; startedPid: number | null; error: string | null; overrides?: ProxyOverrides | null }
   usage: Usage | null
   usageError: string | null
   usageAt: number | null

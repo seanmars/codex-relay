@@ -9,6 +9,7 @@ import {
   HELP,
   type LocalCfg,
   agentSpec,
+  codexSpawn,
   foreignConfigDir,
   foreignReport,
   foreignStatusText,
@@ -19,6 +20,7 @@ import {
   relayIsStale,
   relayUrl,
   runText,
+  spawnDescription,
   startArgv,
   statusReport,
   statusText,
@@ -39,6 +41,11 @@ let startFailedTold = false
 let lastStatus = ''
 let lastHealthSig = ''
 let agentModel = ''
+let agentEffort: string | null = null
+// The effort of the main conversation's last request, which a Codex agent takes when no agentEffort is set
+let mainEffort: string | null = null
+// By agent id: the effort each Codex agent's task shows, which its every request is sent with
+const codexEfforts = new Map<string, string>()
 // ANTHROPIC_BASE_URL as it was before this plugin set it, put back when the relay is gone
 let savedBaseUrl: { value: string | undefined } | null = null
 let pluginVersion: string | null = null
@@ -132,11 +139,14 @@ async function pointSession($: EngineInterface, cfg: LocalCfg, up: boolean): Pro
   }
 }
 
-// The agent type follows the relay's agentModel; registering again replaces it
-async function syncAgent($: EngineInterface, model: string): Promise<void> {
-  if (model === agentModel) return
-  const done = await $.agent.register(agentSpec(model)).then(() => true, () => false)
-  if (done) agentModel = model
+// The agent type follows the relay's agentModel and agentEffort; registering again replaces it
+async function syncAgent($: EngineInterface, model: string, effort: string | null): Promise<void> {
+  if (model === agentModel && effort === agentEffort) return
+  const done = await $.agent.register(agentSpec(model, effort)).then(() => true, () => false)
+  if (done) {
+    agentModel = model
+    agentEffort = effort
+  }
 }
 
 // The context fill as the engine counts it; read only on Codex, where the line shows it
@@ -189,7 +199,7 @@ async function tick($: EngineInterface): Promise<void> {
     if (h) startFailedTold = false
     await pointSession($, cfg, Boolean(h))
     await publish($, h)
-    if (h) await syncAgent($, h.agentModel)
+    if (h) await syncAgent($, h.agentModel, h.agentEffort ?? null)
   } finally {
     ticking = false
   }
@@ -313,6 +323,18 @@ async function runCommand($: EngineInterface, args: string): Promise<string> {
       }
       return isRoute(route) ? setDefault($, route) : `預設只能是 codex 或 claude, 收到 "${route}".`
     }
+    case 'effort': {
+      const level = rest[0]
+      if (!level) {
+        const h = await refresh($)
+        const current = h ? (h.agentEffort ?? 'auto') : (await runCli($, cfg, ['effort'])).stdout.trim()
+        return `codex-relay:codex agent 的 effort: ${current}${current === 'auto' ? ' (與主對話相同)' : ''}`
+      }
+      // The CLI checks the level; the next tick registers the agent type with it
+      const r = await runCli($, cfg, ['effort', level.toLowerCase()]).catch((e: Error) => ({ exitCode: 1, stdout: '', stderr: e.message }))
+      await tick($)
+      return runText(r)
+    }
     case 'status': {
       const h = await refresh($, true)
       return foreignDir ? foreignReport(cfg, foreignDir) : statusReport(h, cfg, Math.floor(Date.now() / 1000))
@@ -362,22 +384,35 @@ export const register: Register = (on) => {
     return next(e)
   })
 
-  // An explicit `model` on the Agent call would replace the agent type's own: Codex agents keep the Codex model.
-  // The row of the call then shows the agent's model; a workflow's agents share one call, so none of them is shown.
+  // A Codex agent's model and effort are decided here, and its task under the prompt shows them: the task's
+  // description is written only once, at the spawn. A workflow agent's description is not applied. The row of the call
+  // then shows the agent's model; a workflow's agents share one call, so none of them is shown.
   on('agent.spawn', async ($, e, next) => {
-    const keepCodex = !e.fork && !e.resume && e.subagentType === AGENT_TYPE && agentModel
-    const r = await next(keepCodex ? { ...e, model: agentModel } : e)
+    const codex =
+      !e.fork && !e.resume && e.subagentType === AGENT_TYPE && agentModel
+        ? codexSpawn(e.model, agentModel, agentEffort, mainEffort, (await read($, health))?.proxy.overrides)
+        : null
+    const description = codex && !e.workflow ? spawnDescription(e.description, codex.shownModel, codex.shownEffort) : e.description
+    const r = await next(codex ? { ...e, model: codex.model, description } : e)
+    if (codex?.effort && r.agentId) codexEfforts.set(r.agentId, codex.effort)
     // A denied spawn has no model
     const model = r.model
     if (model && !e.workflow) await changeSubagents($, (all) => withSpawn(all, e.tool_use_id, r.agentId, model)).catch(() => {})
     return r
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'codex-relay agent.spawn failed' }))
 
-  // Not awaited: the request goes out without waiting on the row
+  // A Codex agent's requests carry the effort its task shows. The row is not awaited: the request goes out without
+  // waiting on it.
   on('turn.step', async function* ($, e, next) {
     const agentId = e.agentId
-    if (agentId) void changeSubagents($, (all) => withStep(all, agentId, e.model, e.effort)).catch(() => {})
-    return yield* next(e)
+    if (!agentId) {
+      if (typeof e.effort === 'string') mainEffort = e.effort
+      return yield* next(e)
+    }
+    const effort = codexEfforts.get(agentId)
+    const step = effort && effort !== e.effort ? { ...e, effort: effort as typeof e.effort } : e
+    void changeSubagents($, (all) => withStep(all, agentId, step.model, step.effort)).catch(() => {})
+    return yield* next(step)
   })
 
   on('command.run', { command: 'relay' }, async ($, e) => ({ text: await runCommand($, e.args) })).catch(() => ({

@@ -76,6 +76,9 @@ function world(on: On, opts: { up: boolean; baseUrl?: string; answer?: () => Hea
 
 const START = { cwd: '/', surface: 'terminal', isInteractive: true } as const
 
+// A label without its colours
+const plain = (s: string) => s.replace(/\x1b\[\d+m/g, '')
+
 test('with the relay up, the session goes through it and the status line shows the Codex session', async ($, on) => {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   const { env, seen } = world(on, { up: true, baseUrl: 'http://127.0.0.1:8950', contextPercent: 42 })
@@ -243,13 +246,16 @@ test('an Agent row shows its model, then the model and effort Codex answered wit
   let answer = health()
   const { clock } = world(on, { up: true, answer: () => answer })
   const spawned: string[] = []
+  const tasks: string[] = []
   on('agent.spawn', (_$, e) => {
     spawned.push(e.tool_use_id)
+    tasks.push(plain(e.description))
     return { model: e.model ?? 'claude-haiku-4-5', agentId: 'agent-1' }
   })
   const drawn: unknown[] = []
   on('ui.render', { component: 'ToolUse' }, ($, e) => {
-    drawn.push((e.props.input as { description?: unknown }).description)
+    const description = (e.props.input as { description?: unknown }).description
+    drawn.push(typeof description === 'string' ? plain(description) : description)
     const { Box } = $.ui.resolve(e)
     return <Box key="engine" />
   })
@@ -265,6 +271,8 @@ test('an Agent row shows its model, then the model and effort Codex answered wit
     fork: false,
   })
 
+  // The task under the prompt gains the model; the row's input, as the model sent it, gains it once at drawing
+  expect(tasks).toEqual(['Find the bug · gpt-5.6-terra'])
   const id = spawned[0]!
   const row = { tool_use_id: id, tool: 'Agent', input: { description: 'Find the bug', prompt: 'look' }, isRunning: true, isErrored: false, isInterrupted: false }
   const ui = await $.ui.mount({ plugin: 'codex-relay', surface: 'terminal', component: 'ToolUse', props: row, requestId: id })
@@ -282,4 +290,97 @@ test('an Agent row shows its model, then the model and effort Codex answered wit
     expect(drawn.at(-1)).toBe(props.tool === 'Bash' ? undefined : 'Find the bug')
     await other.unmount()
   }
+})
+
+const spawnArgs = (subagentType: string) => ({
+  tool_use_id: 'tu-1',
+  prompt: 'look',
+  description: 'Find the bug',
+  subagentType,
+  provider: { plugin: 'codex-relay', tier: 'user' as const },
+  parentModel: 'claude-opus-5-5',
+  background: true,
+  fork: false,
+})
+
+test("a configured effort goes into the agent type and a Codex agent's task; other agents' tasks stay as they came", async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const { seen } = world(on, { up: true, answer: () => health({ agentEffort: 'xhigh' }) })
+  const tasks: string[] = []
+  on('agent.spawn', (_$, e) => {
+    tasks.push(e.description)
+    return { model: e.model ?? 'claude-haiku-4-5', agentId: 'agent-1' }
+  })
+  await $.session.start(START)
+  expect(seen.agents).toEqual([expect.objectContaining({ name: 'codex', model: 'gpt-5.6-terra', effort: 'xhigh' })])
+
+  await $.agent.spawn(spawnArgs('codex-relay:codex'))
+  await $.agent.spawn(spawnArgs('general-purpose'))
+  expect(tasks[0]).toBe('Find the bug · \x1b[36mgpt-5.6-terra\x1b[39m · \x1b[35mxhigh\x1b[39m')
+  expect(tasks[1]).toBe('Find the bug')
+})
+
+test("without agentEffort a Codex agent takes the main conversation's effort, shows it, and sends it on every request", async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  world(on, { up: true })
+  const tasks: string[] = []
+  const models: (string | undefined)[] = []
+  let nextId = 0
+  on('agent.spawn', (_$, e) => {
+    tasks.push(plain(e.description))
+    models.push(e.model)
+    return { model: e.model ?? 'claude-haiku-4-5', agentId: `agent-${++nextId}` }
+  })
+  const sent: { agentId?: string; effort?: unknown }[] = []
+  on('turn.step', async function* (_$, e) {
+    sent.push({ agentId: e.agentId, effort: e.effort })
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: null }
+  })
+  const step = async (effort: 'high' | 'xhigh', agentId?: string) => {
+    const s = $.turn.step({ turnId: 't', index: 0, model: 'm', effort, messageCount: 1, ...(agentId ? { agentId } : {}) })
+    for await (const _ of s);
+    return s.result
+  }
+  await $.session.start(START)
+
+  await step('high')
+  // The call's Codex model is kept; a Claude model is replaced by agentModel
+  await $.agent.spawn({ ...spawnArgs('codex-relay:codex'), model: 'gpt-6-sol' })
+  await $.agent.spawn({ ...spawnArgs('codex-relay:codex'), model: 'sonnet' })
+  expect(models).toEqual(['gpt-6-sol', 'gpt-5.6-terra'])
+  expect(tasks).toEqual(['Find the bug · gpt-6-sol · high', 'Find the bug · gpt-5.6-terra · high'])
+
+  await step('xhigh', 'agent-1')
+  await step('xhigh')
+  expect(sent).toEqual([{ effort: 'high' }, { agentId: 'agent-1', effort: 'high' }, { effort: 'xhigh' }])
+})
+
+test("a Codex agent's task shows the model and effort the proxy's config forces", async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const overrides = { model: 'gpt-6-sol', effort: 'max' }
+  world(on, { up: true, answer: () => health({ agentEffort: 'low', proxy: { ...health().proxy, overrides } }) })
+  const tasks: string[] = []
+  on('agent.spawn', (_$, e) => {
+    tasks.push(plain(e.description))
+    return { model: e.model ?? 'claude-haiku-4-5', agentId: 'agent-1' }
+  })
+  await $.session.start(START)
+  await $.agent.spawn(spawnArgs('codex-relay:codex'))
+  expect(tasks).toEqual(['Find the bug · gpt-6-sol · max'])
+})
+
+test('/relay effort sets the level through the CLI and reports the current one', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  let answer = health()
+  const { seen } = world(on, { up: true, answer: () => answer })
+  await $.session.start(START)
+
+  expect((await $.command.run(relayCmd('effort'))).text).toContain('auto (與主對話相同)')
+  answer = health({ agentEffort: 'high' })
+  await $.command.run(relayCmd('effort High'))
+  expect(seen.runs.some((argv) => argv.slice(-2).join(' ') === 'effort high')).toBe(true)
+  // The tick after the command registers the agent type with the new level
+  expect(seen.agents.at(-1)).toEqual(expect.objectContaining({ effort: 'high' }))
+  expect((await $.command.run(relayCmd('effort'))).text).toBe('codex-relay:codex agent 的 effort: high')
+  expect((await $.command.run(relayCmd('help'))).text).toContain('/relay effort')
 })

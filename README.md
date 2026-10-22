@@ -68,6 +68,7 @@ curl -fsSL https://raw.githubusercontent.com/seanmars/codex-relay/main/scripts/i
 | `/relay` | 開啟面板 (`ctrl+x tab` 後按按鈕上的鍵) |
 | `/relay codex` · `/relay claude` | 切換這個視窗. 只影響目前的 session |
 | `/relay default [codex\|claude]` | 查看或設定新 session 的預設路由 |
+| `/relay effort [low\|medium\|high\|xhigh\|max\|auto]` | 查看或設定 `codex-relay:codex` agent 的 effort. `auto` 與主對話相同 |
 | `/relay status` | 顯示路由, relay, proxy, 這個視窗的 Codex 用量和方案用量 |
 | `/relay usage` | 顯示 Codex 方案的用量上限 |
 | `/relay models [--full]` | 列出帳號目前可用的 Codex model, 以及 proxy 是否支援. `--full` 也列出 hidden model |
@@ -93,6 +94,13 @@ Transcript 裡每個 subagent 那一列的描述後面會加上 model 和 effort
 - Proxy 回應前, 顯示 Claude Code 送出的 model 和 effort.
 - Proxy 回應後, 顯示 `Codex` 和 Codex 實際使用的 model 和 effort. Proxy 可能把 model 對應到別的 model, 也可能用 `codex.effort` 覆蓋 effort.
 - 這些值每 10 秒更新一次. 走 Claude 的 subagent 只顯示 Claude Code 端的值.
+
+`codex-relay:codex` agent 啟動時決定 model 和 effort:
+
+- Model: Agent 呼叫指定 `gpt-` 開頭的 model 時用它. 其他情況用 `agentModel`.
+- Effort: 用 `agentEffort`. 沒有設定時, 用主對話當下的 effort. 這個 agent 的每個 request 都送這個 effort.
+
+Prompt 下方的背景 agent 清單會在 description 後面加上這組 model 和 effort, model 用青色, effort 用洋紅色. Proxy 設定了 `codex.model` 或 `codex.effort` 時, 改為顯示 proxy 的值. 這個值只在啟動時寫入一次. 其他 agent 型別啟動前無法得知 model, 所以只在 transcript 那一列顯示.
 
 ### Statusline
 
@@ -125,6 +133,7 @@ claude-code-proxy monitor --url http://127.0.0.1:8970
 | `proxyCommand` | `"claude-code-proxy"` | Proxy 執行檔名稱或完整路徑 |
 | `defaultRoute` | `"claude"` | 新 session 的路由: `"claude"` 或 `"codex"` |
 | `agentModel` | `"gpt-5.6-terra"` | `codex-relay:codex` subagent 使用的 Codex model |
+| `agentEffort` | 無 (與主對話相同) | `codex-relay:codex` subagent 的 effort: `low`, `medium`, `high`, `xhigh` 或 `max`. Proxy 的 `codex.effort` 會覆蓋它 |
 | `claudeUrl` | `"https://api.anthropic.com"` | Claude 路由的上游位址 |
 | `nodePath` | `"node"` | Plugin 啟動 relay 時使用的 Node 執行檔 (只有 plugin 讀取) |
 
