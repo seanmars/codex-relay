@@ -183,6 +183,15 @@ test('/relay codex and /relay claude pin this session; /relay status reports it'
   expect((await $.command.run(relayCmd('bogus'))).text).toContain('/relay status')
 })
 
+test('/relay stop-proxy runs the CLI that stops the proxy alone', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const { seen } = world(on, { up: true })
+  await $.session.start(START)
+  await $.command.run(relayCmd('stop-proxy'))
+  expect(seen.runs.at(-1)?.slice(-1)).toEqual(['stop-proxy'])
+  expect((await $.command.run(relayCmd('help'))).text).toContain('/relay stop-proxy')
+})
+
 test('the panel switches this window, and leaving Codex for Claude takes a second press', async ($, on) => {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   const { seen } = world(on, { up: true })

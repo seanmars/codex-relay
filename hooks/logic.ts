@@ -180,9 +180,10 @@ export const HELP = [
   '/relay auth [status|login|logout]  Codex CLI 登入 (login 會開啟瀏覽器)',
   '/relay monitor              說明如何開啟 proxy 的 monitor TUI',
   '/relay start | stop | restart  控制 relay (stop/restart 加 --proxy 也停止 proxy)',
+  '/relay stop-proxy           只停止 proxy, relay 繼續執行',
 ].join('\n')
 
-export const COMMAND_WORDS = ['codex', 'claude', 'default', 'status', 'usage', 'models', 'auth', 'monitor', 'start', 'stop', 'restart', 'help']
+export const COMMAND_WORDS = ['codex', 'claude', 'default', 'status', 'usage', 'models', 'auth', 'monitor', 'start', 'stop', 'stop-proxy', 'restart', 'help']
 
 export function parseArgs(args: string): { cmd: string; rest: string[] } {
   const [cmd = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)

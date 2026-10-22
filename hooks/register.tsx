@@ -319,9 +319,10 @@ async function runCommand($: EngineInterface, args: string): Promise<string> {
       ].join('\n')
     case 'start':
     case 'stop':
+    case 'stop-proxy':
     case 'restart': {
       const r = await runCli($, cfg, [cmd, ...rest.filter((a) => a === '--proxy')]).catch((e: Error) => ({ exitCode: 1, stdout: '', stderr: e.message }))
-      if (cmd !== 'stop') lastStart = Date.now()
+      if (cmd === 'start' || cmd === 'restart') lastStart = Date.now()
       await tick($)
       return runText(r)
     }

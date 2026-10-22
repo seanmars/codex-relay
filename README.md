@@ -50,6 +50,8 @@ curl -fsSL https://raw.githubusercontent.com/seanmars/codex-relay/main/scripts/i
 
    Binary 名稱是 `claude-code-proxy`. 如果已經安裝上游版本, 這個指令會取代它.
 
+   Windows 無法取代執行中的 exe. 更新前先執行 `claude-code-proxy stop`, 或在 Claude Code 執行 `/relay stop-proxy`.
+
 2. 安裝 plugin:
 
    ```sh
@@ -72,6 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/seanmars/codex-relay/main/scripts/i
 | `/relay auth [status\|login\|device\|logout]` | Codex 登入. `login` 開啟瀏覽器, `device` 用裝置碼登入 |
 | `/relay monitor` | 顯示開啟 monitor TUI 的指令 (需要另一個終端機) |
 | `/relay start` · `stop` · `restart` | 控制 relay. `stop` 和 `restart` 加上 `--proxy` 會一併停止 proxy |
+| `/relay stop-proxy` | 只停止 proxy, relay 繼續執行. 下一個走 Codex 的 request 會重新啟動 proxy |
 | `/relay help` | 列出所有指令 |
 
 ### 路由規則

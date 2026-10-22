@@ -1,11 +1,11 @@
 // codex-relay command line. Usage: node cli.mjs <command> [args]
-//   start | stop [--proxy] | restart [--proxy] [--if-stale] [--if-idle] | status [--json] | default [claude|codex] | config
-//   | wait [seconds]
+//   start | stop [--proxy] | stop-proxy | restart [--proxy] [--if-stale] [--if-idle] | status [--json]
+//   | default [claude|codex] | config | wait [seconds]
 // The config directory is $CLAUDE_CONFIG_DIR, or ~/.claude.
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import * as L from './logic.mjs'
 
@@ -29,8 +29,7 @@ const VERSION = (() => {
   }
 })()
 
-function request(method, urlPath, body, timeoutMs = 2000) {
-  const { port } = cfg()
+function request(method, urlPath, body, timeoutMs = 2000, port = cfg().port) {
   return new Promise((resolve) => {
     const data = body === undefined ? undefined : JSON.stringify(body)
     const r = http.request(
@@ -48,7 +47,11 @@ function request(method, urlPath, body, timeoutMs = 2000) {
       },
     )
     r.on('error', () => resolve(null))
-    r.on('timeout', () => r.destroy())
+    // destroy() without an error raises no 'error': answer here, or a port that never answers hangs the CLI
+    r.on('timeout', () => {
+      r.destroy()
+      resolve(null)
+    })
     r.end(data)
   })
 }
@@ -84,6 +87,7 @@ async function stop(withProxy, ifIdle = false) {
   const h = await health()
   if (!h?.ok) {
     console.log('Relay is not running')
+    if (withProxy) await stopProxy()
     return true
   }
   if (foreign(h)) return false
@@ -99,12 +103,76 @@ async function stop(withProxy, ifIdle = false) {
   if (r?.busy) return busy(r.busy)
   if (!r?.ok) {
     console.log('Relay is not running')
+    if (withProxy) await stopProxy()
     return true
   }
-  console.log(`Relay stopped (pid ${r.pid})${r.stoppedProxy ? `, Codex proxy stopped (pid ${r.stoppedProxy})` : ''}`)
+  console.log(`Relay stopped (pid ${r.pid})`)
   // Wait until the port is free so a restart can bind it
   for (let i = 0; i < 20 && (await health())?.ok; i++) await sleep(250)
+  // The relay ends only a proxy it started; one from an earlier relay is stopped here
+  if (withProxy) await (r.stoppedProxy ? reportProxyExit(r.stoppedProxy, 5000) : stopProxy())
   return true
+}
+
+// ---------- the Codex proxy ----------
+const isRunning = (pid) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM'
+  }
+}
+
+async function reportProxyExit(pid, timeoutMs) {
+  const until = Date.now() + timeoutMs
+  while (isRunning(pid) && Date.now() < until) await sleep(200)
+  if (!isRunning(pid)) return console.log(`Codex proxy stopped (pid ${pid})`)
+  console.error(`Codex proxy (pid ${pid}) is still running`)
+  process.exitCode = 1
+}
+
+// The process listening on `port`, as the system's own tools report it: { pid, name }, or null
+function portOwner(port) {
+  try {
+    if (process.platform === 'win32') {
+      const ps = `$c = Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1; if ($c) { $p = Get-Process -Id $c.OwningProcess; "$($p.Id) $($p.ProcessName)" }`
+      const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', windowsHide: true }).trim()
+      const m = /^(\d+) (.+)$/.exec(out)
+      return m ? { pid: Number(m[1]), name: m[2] } : null
+    }
+    // -F: one field a line, p<pid> then c<command>; +c 0: the command name whole
+    const out = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '+c', '0', '-Fpc'], { encoding: 'utf8' })
+    const pid = /^p(\d+)$/m.exec(out)
+    const name = /^c(.+)$/m.exec(out)
+    return pid && name ? { pid: Number(pid[1]), name: name[1] } : null
+  } catch {
+    // lsof exits 1 when nothing listens
+    return null
+  }
+}
+
+// Stops the Codex proxy and leaves the relay running. A proxy with `stop` exits once its requests finish; an older one
+// is ended by its process id, and only when the process on the port is the proxy.
+async function stopProxy() {
+  const { proxyPort, proxyCommand } = cfg()
+  const asked = await request('POST', '/shutdown', undefined, 5000, proxyPort)
+  if (asked?.ok && asked.pid) {
+    const grace = Number(asked.graceSeconds) || 10
+    console.log(`Codex proxy (pid ${asked.pid}) is stopping; requests in flight get ${grace} s to finish`)
+    return reportProxyExit(asked.pid, (grace + 5) * 1000)
+  }
+  const owner = portOwner(proxyPort)
+  if (!owner) return console.log(`Codex proxy is not running on 127.0.0.1:${proxyPort}`)
+  const expected = path.parse(proxyCommand).name
+  if (owner.name.toLowerCase() !== expected.toLowerCase()) {
+    console.error(`127.0.0.1:${proxyPort} is held by ${owner.name} (pid ${owner.pid}), not ${expected}; not stopped`)
+    process.exitCode = 1
+    return
+  }
+  process.kill(owner.pid)
+  console.log(`Codex proxy (pid ${owner.pid}) has no stop command; its process was ended`)
+  return reportProxyExit(owner.pid, 5000)
 }
 
 // restart --if-stale: only a relay that runs older code than this copy; a newer one is left alone, so two sessions
@@ -187,6 +255,9 @@ try {
     case 'stop':
       await stop(has('--proxy'))
       break
+    case 'stop-proxy':
+      await stopProxy()
+      break
     case 'restart':
       await restart()
       break
@@ -211,7 +282,7 @@ try {
       console.log(JSON.stringify(cfg(), null, 2))
       break
     default:
-      console.log('Usage: node cli.mjs start | stop [--proxy] | restart [--proxy] [--if-stale] [--if-idle] | status [--json] | default [claude|codex] | config')
+      console.log('Usage: node cli.mjs start | stop [--proxy] | stop-proxy | restart [--proxy] [--if-stale] [--if-idle] | status [--json] | default [claude|codex] | config')
       process.exitCode = cmd ? 2 : 0
   }
 } catch (e) {

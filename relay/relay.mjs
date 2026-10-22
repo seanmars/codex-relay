@@ -165,6 +165,10 @@ function ensureProxy(cfg) {
         windowsHide: true,
       })
       const failed = new Promise((resolve) => c.once('error', (e) => resolve(e)))
+      // A proxy stopped from outside must not leave its pid here: /__shutdown would end whatever reuses it
+      c.once('exit', () => {
+        if (proxyChild?.pid === c.pid) proxyChild = null
+      })
       c.unref()
       log(`started ${cfg.proxyCommand} on port ${cfg.proxyPort} (pid ${c.pid})`)
       for (let i = 0; i < 30; i++) {
