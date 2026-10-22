@@ -64,9 +64,13 @@ const anthropic = fakeServer('anthropic', (req, res) => {
 })
 const monitorSessions = []
 const proxy = fakeServer('proxy', (req, res) => {
-  if (req.url !== '/monitor') return false
+  const answers = {
+    '/monitor': { version: 1, snapshot: { sessions: monitorSessions } },
+    '/healthz': { ok: true, codex: { model: 'gpt-6-sol', effort: null } },
+  }
+  if (!(req.url in answers)) return false
   res.writeHead(200, { 'content-type': 'application/json' })
-  res.end(JSON.stringify({ version: 1, snapshot: { sessions: monitorSessions } }))
+  res.end(JSON.stringify(answers[req.url]))
   return true
 })
 let dir
@@ -147,6 +151,7 @@ test('health reports the session route and its Codex usage from the proxy monito
   assert.equal(h.json.proxy.up, true)
   assert.equal(h.json.session.codex.inputTokens, 900)
   assert.equal(h.json.session.codex.model, 'gpt-5.6-terra')
+  assert.deepEqual(h.json.proxy.overrides, { model: 'gpt-6-sol', effort: null })
 })
 
 test('a browser or another host is refused', async () => {

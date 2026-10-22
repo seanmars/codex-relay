@@ -58,9 +58,15 @@ export function parseConfig(raw) {
     proxyCommand: str(j.proxyCommand, 'claude-code-proxy'),
     defaultRoute: isRoute(j.defaultRoute) ? j.defaultRoute : 'claude',
     agentModel: str(j.agentModel, 'gpt-5.6-terra'),
+    // null leaves the effort to Claude Code
+    agentEffort: isEffort(j.agentEffort) ? j.agentEffort : null,
     claudeUrl: str(j.claudeUrl, 'https://api.anthropic.com'),
   }
 }
+
+// The levels an agent definition takes, as Claude Code sends them
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+export const isEffort = (v) => EFFORTS.includes(v)
 
 const stripHint = (model) => String(model || '').replace(/\[1m\]$/i, '')
 
@@ -173,6 +179,14 @@ export function agentStats(monitor, sid) {
     a.effort = r.effort || a.effort
   }
   return agents
+}
+
+// The Codex model and effort the proxy's config forces on every request, out of its /healthz answer; null from a
+// proxy that does not say
+export function proxyOverrides(healthz) {
+  const c = healthz && healthz.codex
+  if (!c || typeof c !== 'object') return null
+  return { model: c.model || null, effort: c.effort || null }
 }
 
 // The two plan windows out of `claude-code-proxy codex usage --json`

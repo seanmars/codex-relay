@@ -51,10 +51,9 @@ async function standIn(t, port, stoppable) {
   return child
 }
 
-// Runs the CLI for a fresh config dir whose proxy is on `proxyPort`, and whose relay port nothing answers on
-async function cli(args, cfg) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-relay-cli-'))
-  fs.writeFileSync(path.join(dir, 'codex-relay.json'), JSON.stringify({ port: await freePort(), ...cfg }))
+// Runs the CLI for a config dir, fresh unless given, whose proxy is on `proxyPort`, and whose relay port nothing answers on
+async function cli(args, cfg, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-relay-cli-'))) {
+  if (cfg) fs.writeFileSync(path.join(dir, 'codex-relay.json'), JSON.stringify({ port: await freePort(), ...cfg }))
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(here, 'cli.mjs'), ...args], {
       env: { ...process.env, CLAUDE_CONFIG_DIR: dir },
@@ -100,6 +99,26 @@ test('stop-proxy ends an older proxy by its process id, and only when the proces
   assert.equal(ended.code, 0, ended.out)
   assert.match(ended.out, /its process was ended/)
   assert.equal(isRunning(holder.pid), false)
+})
+
+test('effort writes a level to the config, auto removes it, and an unknown level changes nothing', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-relay-cli-'))
+  const saved = () => JSON.parse(fs.readFileSync(path.join(dir, 'codex-relay.json'), 'utf8'))
+  await cli(['config'], { defaultRoute: 'codex' }, dir)
+  assert.match((await cli(['effort'], undefined, dir)).out, /^auto$/m)
+
+  assert.equal((await cli(['effort', 'xhigh'], undefined, dir)).code, 0)
+  assert.equal(saved().agentEffort, 'xhigh')
+  assert.match((await cli(['effort'], undefined, dir)).out, /^xhigh$/m)
+
+  const bad = await cli(['effort', 'turbo'], undefined, dir)
+  assert.equal(bad.code, 2, bad.out)
+  assert.equal(saved().agentEffort, 'xhigh')
+
+  assert.equal((await cli(['effort', 'auto'], undefined, dir)).code, 0)
+  assert.equal('agentEffort' in saved(), false)
+  // The rest of the file is kept
+  assert.equal(saved().defaultRoute, 'codex')
 })
 
 test('stop-proxy with nothing on the port says the proxy is not running', async () => {

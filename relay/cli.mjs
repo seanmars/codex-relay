@@ -1,6 +1,6 @@
 // codex-relay command line. Usage: node cli.mjs <command> [args]
 //   start | stop [--proxy] | stop-proxy | restart [--proxy] [--if-stale] [--if-idle] | status [--json]
-//   | default [claude|codex] | config | wait [seconds]
+//   | default [claude|codex] | effort [low|medium|high|xhigh|max|auto] | config | wait [seconds]
 // The config directory is $CLAUDE_CONFIG_DIR, or ~/.claude.
 import http from 'node:http'
 import fs from 'node:fs'
@@ -245,6 +245,18 @@ function setDefault(route) {
   console.log(`New sessions start on ${route}. Sessions already started keep their route.`)
 }
 
+// `auto` drops the setting: the agents take the main conversation's effort again
+function setEffort(level) {
+  if (level === undefined) return console.log(cfg().agentEffort ?? 'auto')
+  if (level !== 'auto' && !L.isEffort(level)) {
+    console.error(`expected ${L.EFFORTS.join(', ')} or auto, got "${level}"`)
+    process.exitCode = 2
+    return
+  }
+  writeConfig({ agentEffort: level === 'auto' ? undefined : level })
+  console.log(level === 'auto' ? "codex-relay:codex agents run at the main conversation's effort." : `codex-relay:codex agents run at ${level} effort.`)
+}
+
 const [cmd, ...args] = process.argv.slice(2)
 const has = (flag) => args.includes(flag)
 try {
@@ -278,11 +290,16 @@ try {
     case 'default':
       setDefault(args[0])
       break
+    case 'effort':
+      setEffort(args[0])
+      break
     case 'config':
       console.log(JSON.stringify(cfg(), null, 2))
       break
     default:
-      console.log('Usage: node cli.mjs start | stop [--proxy] | stop-proxy | restart [--proxy] [--if-stale] [--if-idle] | status [--json] | default [claude|codex] | config')
+      console.log(
+        'Usage: node cli.mjs start | stop [--proxy] | stop-proxy | restart [--proxy] [--if-stale] [--if-idle] | status [--json] | default [claude|codex] | effort [low|medium|high|xhigh|max|auto] | config',
+      )
       process.exitCode = cmd ? 2 : 0
   }
 } catch (e) {

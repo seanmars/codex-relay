@@ -20,6 +20,18 @@ test('parseConfig falls back to defaults for a missing, broken or invalid file',
   assert.deepEqual([c.port, c.proxyPort, c.defaultRoute, c.proxyCommand], [9000, 19000, 'codex', 'C:/bin/ccp.exe'])
 })
 
+test('agentEffort keeps a known level and leaves anything else to Claude Code', () => {
+  assert.equal(L.parseConfig('').agentEffort, null)
+  assert.equal(L.parseConfig('{"agentEffort":"xhigh"}').agentEffort, 'xhigh')
+  for (const bad of ['"turbo"', '"High"', '3', '""']) assert.equal(L.parseConfig(`{"agentEffort":${bad}}`).agentEffort, null, bad)
+})
+
+test("proxyOverrides reads the proxy's forced model and effort, and nothing from a proxy that does not say", () => {
+  assert.deepEqual(L.proxyOverrides({ ok: true, codex: { model: 'gpt-6-sol', effort: '' } }), { model: 'gpt-6-sol', effort: null })
+  assert.equal(L.proxyOverrides({ ok: true }), null)
+  assert.equal(L.proxyOverrides(null), null)
+})
+
 test('codexModelFor keeps Codex ids and maps any Claude id to its tier', () => {
   assert.equal(L.codexModelFor('gpt-6-sol[1m]'), 'gpt-6-sol')
   assert.equal(L.codexModelFor('claude-sonnet-4-5-20250929'), 'sonnet')

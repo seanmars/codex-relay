@@ -216,9 +216,10 @@ async function toCodex(cfg, req, res, body) {
 // ---------- statusline data ----------
 const cache = { usage: { at: 0, value: null, error: null, running: false } }
 
-function proxyMonitor(cfg) {
+// The proxy's JSON answer at `urlPath`, or null
+function proxyGet(cfg, urlPath) {
   return new Promise((resolve) => {
-    const r = http.get({ host: '127.0.0.1', port: cfg.proxyPort, path: '/monitor', timeout: 1500 }, (ur) => {
+    const r = http.get({ host: '127.0.0.1', port: cfg.proxyPort, path: urlPath, timeout: 1500 }, (ur) => {
       const ch = []
       ur.on('data', (c) => ch.push(c))
       ur.on('end', () => {
@@ -230,7 +231,11 @@ function proxyMonitor(cfg) {
       })
     })
     r.on('error', () => resolve(null))
-    r.on('timeout', () => r.destroy())
+    // destroy() without an error raises no 'error': answer here, or a proxy that never answers hangs /__health
+    r.on('timeout', () => {
+      r.destroy()
+      resolve(null)
+    })
   })
 }
 
@@ -267,7 +272,7 @@ async function control(req, res, body) {
     const session = L.sessionRoute(state, cfg, sid)
     if (session.route === 'codex' || u.searchParams.get('usage') === '1') refreshUsage(cfg)
     const proxyUp = await portOpen(cfg.proxyPort, 500)
-    const monitor = proxyUp ? await proxyMonitor(cfg) : null
+    const [monitor, proxyHealth] = proxyUp ? await Promise.all([proxyGet(cfg, '/monitor'), proxyGet(cfg, '/healthz')]) : [null, null]
     return json(res, {
       ok: true,
       pid: process.pid,
@@ -278,9 +283,17 @@ async function control(req, res, body) {
       inflight,
       defaultRoute: cfg.defaultRoute,
       agentModel: cfg.agentModel,
+      agentEffort: cfg.agentEffort,
       pinnedSessions: Object.keys(state.sticky).length,
       session: { sid, ...session, codex: L.sessionStats(monitor, sid), agents: L.agentStats(monitor, sid) },
-      proxy: { port: cfg.proxyPort, command: cfg.proxyCommand, up: proxyUp, startedPid: proxyChild?.pid ?? null, error: proxyError },
+      proxy: {
+        port: cfg.proxyPort,
+        command: cfg.proxyCommand,
+        up: proxyUp,
+        startedPid: proxyChild?.pid ?? null,
+        error: proxyError,
+        overrides: L.proxyOverrides(proxyHealth),
+      },
       usage: cache.usage.value,
       usageError: cache.usage.error,
       usageAt: cache.usage.at || null,

@@ -170,6 +170,7 @@ Codex 的設定放在 `codex` 物件中. 同名的 `CCP_CODEX_*` 環境變數優
 | `restart [--proxy] [--if-stale] [--if-idle]` | 先停止再啟動 relay. `--proxy` 一併停止 proxy. `--if-stale` 只在執行中的 relay 版本比這份程式舊時重啟. `--if-idle` 在 relay 處理 request 時不重啟, exit code 是 `3` |
 | `status [--json]` | 顯示設定檔, 預設路由, relay, proxy 和 Codex 方案用量. Relay 沒有執行時 exit code 是 `1`. `--json` 印出 `/__health` 的原始回應 |
 | `default [claude\|codex]` | 沒有參數時, 印出新 session 的預設路由. 有參數時, 把它寫入 `codex-relay.json` |
+| `effort [low\|medium\|high\|xhigh\|max\|auto]` | 沒有參數時, 印出 `agentEffort`. 有參數時, 把它寫入 `codex-relay.json`. `auto` 移除這個設定 |
 | `config` | 印出目前生效的設定 (已合併預設值) |
 | `wait [seconds]` | 等待 relay 回應, 最多等 `seconds` 秒 (預設 `10`). Relay 回應時 exit code 是 `0`, 逾時是 `1` |
 
