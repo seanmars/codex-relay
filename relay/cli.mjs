@@ -207,6 +207,11 @@ async function status(asJson) {
   }
   console.log(`Relay: up on 127.0.0.1:${h.port} (pid ${h.pid}, ${h.version}, ${h.pinnedSessions} pinned sessions)`)
   console.log(`Codex proxy: ${h.proxy.up ? 'up' : 'down'} on 127.0.0.1:${h.proxy.port} (${h.proxy.command})${h.proxy.error ? ` - ${h.proxy.error}` : ''}`)
+  const auth = h.proxy.auth
+  if (auth) {
+    console.log(`Codex sign-in source: ${auth.source}`)
+    if (auth.configured !== auth.source) console.log(`  Warning: the config now says ${auth.configured}; run "stop-proxy" to apply it`)
+  }
   if (h.usage) {
     const windows = [h.usage.primary, h.usage.secondary].filter(Boolean).map(windowText)
     console.log(`Codex plan: ${h.usage.plan ?? '?'}, ${windows.join(', ') || 'no usage window'}${h.usage.allowed ? '' : ' (limit reached)'}`)

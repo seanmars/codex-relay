@@ -189,6 +189,14 @@ export function proxyOverrides(healthz) {
   return { model: c.model || null, effort: c.effort || null }
 }
 
+// The sign-in source the running proxy reads and the one its config names now, out of its /healthz answer; null from
+// a proxy that does not say. They differ after `codex auth source` until the proxy restarts.
+export function proxyAuth(healthz) {
+  const c = healthz && healthz.codex
+  if (!c || typeof c.authSource !== 'string' || typeof c.configuredAuthSource !== 'string') return null
+  return { source: c.authSource, configured: c.configuredAuthSource }
+}
+
 // The two plan windows out of `claude-code-proxy codex usage --json`
 export function usageSummary(usage) {
   const rl = usage && usage.rate_limit

@@ -32,6 +32,13 @@ test("proxyOverrides reads the proxy's forced model and effort, and nothing from
   assert.equal(L.proxyOverrides(null), null)
 })
 
+test("proxyAuth reads the proxy's sign-in source and the configured one, and nothing from a proxy that does not say", () => {
+  const healthz = { ok: true, codex: { model: null, effort: null, authSource: 'codex-cli', configuredAuthSource: 'proxy' } }
+  assert.deepEqual(L.proxyAuth(healthz), { source: 'codex-cli', configured: 'proxy' })
+  assert.equal(L.proxyAuth({ ok: true, codex: { model: null, effort: null } }), null)
+  assert.equal(L.proxyAuth(null), null)
+})
+
 test('codexModelFor keeps Codex ids and maps any Claude id to its tier', () => {
   assert.equal(L.codexModelFor('gpt-6-sol[1m]'), 'gpt-6-sol')
   assert.equal(L.codexModelFor('claude-sonnet-4-5-20250929'), 'sonnet')

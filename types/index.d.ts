@@ -23,6 +23,9 @@ export type Usage = { plan: string | null; allowed: boolean; primary: UsageWindo
 
 export type ProxyOverrides = { model: string | null; effort: string | null }
 
+// The sign-in source the running proxy reads, and the one its config names now ("proxy" or "codex-cli")
+export type ProxyAuth = { source: string; configured: string }
+
 // The relay's GET /__health answer
 export type Health = {
   ok: true
@@ -42,7 +45,7 @@ export type Health = {
   session: { sid: string; route: Route; pinned: boolean; codex: CodexStats | null; agents?: Record<string, AgentCodexStats> }
   // `overrides`: what the proxy's config forces on every Codex request; null from a proxy that does not say, absent
   // from a relay before it
-  proxy: { port: number; command: string; up: boolean; startedPid: number | null; error: string | null; overrides?: ProxyOverrides | null }
+  proxy: { port: number; command: string; up: boolean; startedPid: number | null; error: string | null; overrides?: ProxyOverrides | null; auth?: ProxyAuth | null }
   usage: Usage | null
   usageError: string | null
   usageAt: number | null

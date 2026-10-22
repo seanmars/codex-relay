@@ -293,6 +293,7 @@ async function control(req, res, body) {
         startedPid: proxyChild?.pid ?? null,
         error: proxyError,
         overrides: L.proxyOverrides(proxyHealth),
+        auth: L.proxyAuth(proxyHealth),
       },
       usage: cache.usage.value,
       usageError: cache.usage.error,
