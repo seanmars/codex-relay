@@ -199,6 +199,22 @@ test('/relay codex and /relay claude pin this session; /relay status reports it'
   expect((await $.command.run(relayCmd('bogus'))).text).toContain('/relay status')
 })
 
+test('/relay status shows the sign-in source, and warns when the config names another until the proxy restarts', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  let auth = { source: 'codex-cli', configured: 'codex-cli' }
+  world(on, { up: true, answer: () => health({ proxy: { ...health().proxy, auth } }) })
+  await $.session.start(START)
+
+  const same = (await $.command.run(relayCmd('status'))).text ?? ''
+  expect(same).toContain('Codex 登入來源: codex-cli')
+  expect(same).not.toContain('警告')
+
+  auth = { source: 'codex-cli', configured: 'proxy' }
+  const stale = (await $.command.run(relayCmd('status'))).text ?? ''
+  expect(stale).toContain('設定已改為 proxy, 執行中的 proxy 仍使用 codex-cli')
+  expect(stale).toContain('/relay stop-proxy')
+})
+
 test('/relay stop-proxy runs the CLI that stops the proxy alone', async ($, on) => {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   const { seen } = world(on, { up: true })

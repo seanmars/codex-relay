@@ -235,6 +235,14 @@ export function statusReport(h: Health | null, cfg: LocalCfg, nowSec: number): s
     `Relay: ${relayUrl(cfg)} (pid ${h.pid}, ${h.version}, 固定的 session: ${h.pinnedSessions})`,
     `Codex proxy: ${h.proxy.up ? '執行中' : '未執行'} 127.0.0.1:${h.proxy.port} (${h.proxy.command})${h.proxy.error ? `\n  錯誤: ${h.proxy.error}` : ''}`,
   ]
+  // The proxy picks its sign-in source at start: a later change waits for a restart, and until then requests get 401
+  const auth = h.proxy.auth
+  if (auth) {
+    lines.push(`Codex 登入來源: ${auth.source}`)
+    if (auth.configured !== auth.source) {
+      lines.push(`  警告: 設定已改為 ${auth.configured}, 執行中的 proxy 仍使用 ${auth.source}. 執行 /relay stop-proxy 套用.`)
+    }
+  }
   const c = h.session.codex
   if (c) {
     lines.push(
