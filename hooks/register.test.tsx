@@ -192,6 +192,15 @@ test('/relay stop-proxy runs the CLI that stops the proxy alone', async ($, on) 
   expect((await $.command.run(relayCmd('help'))).text).toContain('/relay stop-proxy')
 })
 
+test('/relay stop is not a command: it runs no CLI', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  const { seen } = world(on, { up: true })
+  await $.session.start(START)
+  const runs = seen.runs.length
+  expect((await $.command.run(relayCmd('stop'))).text).toContain('不認得 "stop"')
+  expect(seen.runs.length).toBe(runs)
+})
+
 test('the panel switches this window, and leaving Codex for Claude takes a second press', async ($, on) => {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   const { seen } = world(on, { up: true })

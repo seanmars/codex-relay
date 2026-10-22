@@ -218,12 +218,12 @@ export const HELP = [
   '/relay models [--full]      列出帳號可用的 Codex model 與 proxy 支援狀況',
   '/relay auth [status|login|device|logout]  Codex 登入 (login 開啟瀏覽器, device 用裝置碼登入)',
   '/relay monitor              說明如何開啟 proxy 的 monitor TUI',
-  '/relay start | stop | restart  控制 relay (stop/restart 加 --proxy 也停止 proxy)',
+  '/relay start | restart [--proxy]  啟動或重啟 relay (restart 加 --proxy 也停止 proxy)',
   '/relay stop-proxy           只停止 proxy, relay 繼續執行',
   '/relay help                 列出所有指令',
 ].join('\n')
 
-export const COMMAND_WORDS = ['panel', 'codex', 'claude', 'default', 'status', 'usage', 'models', 'auth', 'monitor', 'start', 'stop', 'stop-proxy', 'restart', 'help']
+export const COMMAND_WORDS = ['panel', 'codex', 'claude', 'default', 'status', 'usage', 'models', 'auth', 'monitor', 'start', 'restart', 'stop-proxy', 'help']
 
 export function parseArgs(args: string): { cmd: string; rest: string[] } {
   const [cmd = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)

@@ -334,7 +334,6 @@ async function runCommand($: EngineInterface, args: string): Promise<string> {
         '這個視窗的摘要用 /relay status 查看.',
       ].join('\n')
     case 'start':
-    case 'stop':
     case 'stop-proxy':
     case 'restart': {
       const r = await runCli($, cfg, [cmd, ...rest.filter((a) => a === '--proxy')]).catch((e: Error) => ({ exitCode: 1, stdout: '', stderr: e.message }))

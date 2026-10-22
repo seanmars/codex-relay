@@ -73,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/seanmars/codex-relay/main/scripts/i
 | `/relay models [--full]` | 列出帳號目前可用的 Codex model, 以及 proxy 是否支援. `--full` 也列出 hidden model |
 | `/relay auth [status\|login\|device\|logout]` | Codex 登入. `login` 開啟瀏覽器, `device` 用裝置碼登入 |
 | `/relay monitor` | 顯示開啟 monitor TUI 的指令 (需要另一個終端機) |
-| `/relay start` · `stop` · `restart` | 控制 relay. `stop` 和 `restart` 加上 `--proxy` 會一併停止 proxy |
+| `/relay start` · `restart [--proxy]` | 啟動或重啟 relay. `restart` 加上 `--proxy` 會一併停止 proxy |
 | `/relay stop-proxy` | 只停止 proxy, relay 繼續執行. 下一個走 Codex 的 request 會重新啟動 proxy |
 | `/relay help` | 列出所有指令 |
 

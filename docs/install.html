@@ -434,9 +434,9 @@ Codex proxy: 未執行 127.0.0.1:8970 (claude-code-proxy)</div>
       </div>
 
       <h3>移除</h3>
-      <div class="cmd slash">
-        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay stop --proxy</code><button type="button">複製</button></div>
-        <p class="why">在 Claude Code 中執行. 停止 relay 和 proxy, 讓後面的移除步驟不會被執行中的程式擋住.</p>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>node relay/cli.mjs stop --proxy</code><button type="button">複製</button></div>
+        <p class="why">在安裝時下載的 <code>codex-relay</code> 資料夾中執行. 停止 relay 和 proxy, 讓後面的移除步驟不會被執行中的程式擋住.</p>
       </div>
       <div class="cmd">
         <div class="cmd-line"><span class="prompt">$</span><code>claude plugin uninstall codex-relay@codex-relay</code><button type="button">複製</button></div>
