@@ -22,7 +22,23 @@ Claude Code ── ANTHROPIC_BASE_URL ──▶ relay (Node, 127.0.0.1:8960)
 
 ## 安裝
 
-完整的逐步說明 (含 Windows / macOS / Linux 的前置工具) 請看 [docs/install.html](docs/install.html). 用瀏覽器開啟這個檔案.
+安裝腳本, 驗證步驟和疑難排解請看 [docs/install.html](docs/install.html). 用瀏覽器開啟這個檔案.
+
+可以用安裝腳本完成下面的步驟. 腳本只安裝缺少的工具, 每個指令執行前都會詢問.
+
+Windows, 在 PowerShell 7 (`pwsh`) 中執行:
+
+```powershell
+irm https://raw.githubusercontent.com/seanmars/codex-relay/main/scripts/install.ps1 | iex
+```
+
+macOS / Linux, 在終端機中執行:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/seanmars/codex-relay/main/scripts/install.sh | bash
+```
+
+手動安裝:
 
 1. 安裝 proxy:
 
