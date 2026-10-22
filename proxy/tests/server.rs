@@ -294,6 +294,51 @@ async fn messages_ingress_forwards_only_strict_conversation_identity() {
 }
 
 #[tokio::test]
+async fn monitor_names_the_subagent_each_request_came_from() {
+    let monitor = MonitorHandle::new(10);
+    let provider = Arc::new(IdentityCaptureProvider {
+        captured: Arc::new(Mutex::new(Vec::new())),
+    }) as Arc<dyn Provider>;
+    let app = app_with_monitor(
+        Arc::new(Registry::from_providers(AliasProvider::Codex, [provider])),
+        Some(monitor.clone()),
+    );
+    let body = json!({
+        "model": "gpt-6-astra",
+        "max_tokens": 32,
+        "messages": [{"role": "user", "content": "hello"}]
+    });
+
+    for headers in [
+        vec![("x-claude-code-session-id", "session-a")],
+        vec![
+            ("x-claude-code-session-id", "session-a"),
+            ("x-claude-code-agent-id", "agent-child"),
+            ("x-claude-code-parent-agent-id", "agent-parent"),
+        ],
+        vec![
+            ("x-claude-code-session-id", "session-a"),
+            ("x-claude-code-agent-id", "malformed agent"),
+        ],
+    ] {
+        assert_eq!(
+            call_identity_ingress(&app, "/v1/messages", &headers, body.clone()).await,
+            StatusCode::OK
+        );
+    }
+
+    let state = monitor.snapshot();
+    let mut agents: Vec<_> = state
+        .active
+        .iter()
+        .map(|request| request.agent_id.clone())
+        .chain(state.recent.iter().map(|request| request.agent_id.clone()))
+        .collect();
+    agents.sort();
+    assert_eq!(agents, vec![None, None, Some("agent-child".to_string())]);
+}
+
+#[tokio::test]
 async fn bind_error_names_address_and_port() {
     let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = occupied.local_addr().unwrap().port();

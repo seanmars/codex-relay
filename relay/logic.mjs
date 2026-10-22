@@ -153,6 +153,28 @@ export function sessionStats(monitor, sid) {
   }
 }
 
+// This session's subagents out of the proxy's /monitor answer, by the agent id Claude Code sends: the model and effort
+// of each one's latest request. The proxy keeps only its latest requests, so an agent quiet for long drops out.
+export function agentStats(monitor, sid) {
+  const snapshot = monitor && monitor.snapshot
+  const list = (key) => (snapshot && Array.isArray(snapshot[key]) ? snapshot[key] : [])
+  const agents = Object.create(null)
+  if (!sid) return agents
+  // Oldest first, so the latest request writes last: `recent` is newest first, `active` oldest first
+  for (const r of [...list('recent')].reverse().concat(list('active'))) {
+    if (!r || r.session_id !== sid || typeof r.agent_id !== 'string' || !r.agent_id) continue
+    const a = (agents[r.agent_id] ??= { requestedModel: null, resolvedModel: null, effort: null, requests: 0 })
+    a.requests++
+    // The model fields move together so the pair always names one request
+    if (r.requested_model || r.resolved_model) {
+      a.requestedModel = r.requested_model || null
+      a.resolvedModel = r.resolved_model || null
+    }
+    a.effort = r.effort || a.effort
+  }
+  return agents
+}
+
 // The two plan windows out of `claude-code-proxy codex usage --json`
 export function usageSummary(usage) {
   const rl = usage && usage.rate_limit

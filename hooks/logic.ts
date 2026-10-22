@@ -1,5 +1,5 @@
 // Pure helpers for the hooks module: no engine calls, so tests run them directly
-import type { CodexStats, Health, Route, Usage, UsageWindow } from '../types'
+import type { AgentCodexStats, CodexStats, Health, Route, Subagent, Subagents, Usage, UsageWindow } from '../types'
 
 export type LocalCfg = { port: number; proxyPort: number; proxyCommand: string; agentModel: string; nodePath: string }
 
@@ -76,6 +76,45 @@ export function agentSpec(model: string) {
       "You are an agent for Claude Code, Anthropic's official CLI for Claude. Given the user's message, use the available tools to complete the task fully and report your findings and changes clearly and concisely.",
     model,
   }
+}
+
+// What an Agent row shows after its description. Codex's answer wins over what Claude Code asked for: the proxy may
+// map the model to another and override the effort.
+export function subagentLabel(s: Subagent | undefined): string {
+  if (!s) return ''
+  const model = s.codex ? `Codex ${s.codex.resolvedModel || s.codex.requestedModel || ''}`.trim() : s.model
+  const effort = s.codex ? s.codex.effort : s.effort
+  return [model, effort].filter(Boolean).join(' · ')
+}
+
+// `all` itself when nothing changed: each write redraws every Agent row
+function patched(all: Subagents, toolUseId: string, patch: Subagent): Subagents {
+  const before = all[toolUseId] ?? {}
+  const after = { ...before, ...patch }
+  return JSON.stringify(after) === JSON.stringify(before) ? all : { ...all, [toolUseId]: after }
+}
+
+const rowOf = (all: Subagents, agentId: string) => Object.keys(all).find((id) => all[id]?.agentId === agentId)
+
+// A spawn names the row's agent and the model Claude Code started it on
+export function withSpawn(all: Subagents, toolUseId: string, agentId: string | undefined, model: string): Subagents {
+  return patched(all, toolUseId, agentId ? { agentId, model } : { model })
+}
+
+// Each model request of the agent's loop: the model and effort Claude Code sends
+export function withStep(all: Subagents, agentId: string, model: string, effort: string | number | undefined): Subagents {
+  const id = rowOf(all, agentId)
+  return id ? patched(all, id, effort === undefined ? { model } : { model, effort: String(effort) }) : all
+}
+
+// The relay's session.agents: what Codex answered each agent with. An agent the relay no longer reports keeps its last.
+export function withCodex(all: Subagents, agents: Record<string, AgentCodexStats> | undefined): Subagents {
+  let next = all
+  for (const [agentId, codex] of Object.entries(agents ?? {})) {
+    const id = rowOf(next, agentId)
+    if (id) next = patched(next, id, { codex })
+  }
+  return next
 }
 
 export function fmtTokens(n: number): string {

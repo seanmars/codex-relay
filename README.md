@@ -88,6 +88,12 @@ curl -fsSL https://raw.githubusercontent.com/seanmars/codex-relay/main/scripts/i
 
 `codex-relay:codex` agent type 在 Codex 上執行, model 由 `agentModel` 指定. 主對話可以留在 Claude.
 
+Transcript 裡每個 subagent 那一列的描述後面會加上 model 和 effort, 例如 `Find the bug · Codex gpt-5.6-sol · high`.
+
+- Proxy 回應前, 顯示 Claude Code 送出的 model 和 effort.
+- Proxy 回應後, 顯示 `Codex` 和 Codex 實際使用的 model 和 effort. Proxy 可能把 model 對應到別的 model, 也可能用 `codex.effort` 覆蓋 effort.
+- 這些值每 10 秒更新一次. 走 Claude 的 subagent 只顯示 Claude Code 端的值.
+
 ### Statusline
 
 範例: `⚠ codex-relay: ⇄ Codex gpt-5.6-terra · ctx 42% · 5h 23% · 週 41%`.

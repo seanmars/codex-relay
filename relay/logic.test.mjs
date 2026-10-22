@@ -121,3 +121,22 @@ test('sessionStats turns the monitor model fields of the shared contract into it
   const stats = L.sessionStats(contract.monitor, contract.sessionId)
   assert.deepEqual({ model: stats.model, requestedModel: stats.requestedModel, resolvedModel: stats.resolvedModel }, contract.codex)
 })
+
+test('agentStats turns the subagent requests of the shared contract into session.agents', () => {
+  assert.deepEqual({ ...L.agentStats(contract.agents.monitor, contract.agents.sessionId) }, contract.agents.stats)
+})
+
+test('agentStats leaves out the main conversation, other sessions and a proxy without agent ids', () => {
+  const req = (over) => ({ session_id: 's1', agent_id: 'a1', requested_model: 'opus', resolved_model: 'gpt-6-sol', effort: 'low', ...over })
+  const monitor = {
+    snapshot: {
+      recent: [req({ agent_id: null }), req({ session_id: 's2' }), req({ effort: null }), req({ effort: 'xhigh', requested_model: null, resolved_model: null })],
+      active: [],
+    },
+  }
+  // A request without a model or effort keeps the earlier one's
+  assert.deepEqual({ ...L.agentStats(monitor, 's1') }, { a1: { requestedModel: 'opus', resolvedModel: 'gpt-6-sol', effort: 'xhigh', requests: 2 } })
+  assert.deepEqual({ ...L.agentStats(monitor, '') }, {})
+  assert.deepEqual({ ...L.agentStats(null, 's1') }, {})
+  assert.deepEqual({ ...L.agentStats({ snapshot: { recent: [{ session_id: 's1', model: 'opus' }] } }, 's1') }, {})
+})

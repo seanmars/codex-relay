@@ -14,6 +14,9 @@ export type CodexStats = {
   lastStatus: string | null
 }
 
+// One subagent's latest Codex request, as the proxy answered it
+export type AgentCodexStats = { requestedModel: string | null; resolvedModel: string | null; effort: string | null; requests: number }
+
 export type UsageWindow = { usedPercent: number; windowSeconds: number; resetAt: number }
 
 export type Usage = { plan: string | null; allowed: boolean; primary: UsageWindow | null; secondary: UsageWindow | null }
@@ -31,7 +34,8 @@ export type Health = {
   defaultRoute: Route
   agentModel: string
   pinnedSessions: number
-  session: { sid: string; route: Route; pinned: boolean; codex: CodexStats | null }
+  // `agents` is keyed by the subagent's id; absent from a relay before it
+  session: { sid: string; route: Route; pinned: boolean; codex: CodexStats | null; agents?: Record<string, AgentCodexStats> }
   proxy: { port: number; command: string; up: boolean; startedPid: number | null; error: string | null }
   usage: Usage | null
   usageError: string | null
@@ -40,10 +44,16 @@ export type Health = {
 
 export type PanelNote = { text: string; ok: boolean }
 
+// What an Agent row shows of its subagent: Claude Code's model and effort, and Codex's once the proxy answered
+export type Subagent = { agentId?: string; model?: string; effort?: string; codex?: AgentCodexStats }
+
+// By the Agent tool call's tool_use_id, the row's requestId
+export type Subagents = Record<string, Subagent>
+
 export type PanelUi = { open: boolean; confirmingClaude: boolean; busy: boolean; note?: PanelNote }
 
 declare module 'claude-code' {
   interface PluginState {
-    'codex-relay': { panelUi: PanelUi; health: Health | null }
+    'codex-relay': { panelUi: PanelUi; health: Health | null; subagents: Subagents }
   }
 }

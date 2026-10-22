@@ -228,3 +228,49 @@ test('the panel offers to start a relay that does not answer', async ($, on) => 
   expect(await ui.find({ key: 'to-codex' })).toBeUndefined()
   await ui.unmount()
 })
+
+test('an Agent row shows its model, then the model and effort Codex answered with', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  let answer = health()
+  const { clock } = world(on, { up: true, answer: () => answer })
+  const spawned: string[] = []
+  on('agent.spawn', (_$, e) => {
+    spawned.push(e.tool_use_id)
+    return { model: e.model ?? 'claude-haiku-4-5', agentId: 'agent-1' }
+  })
+  const drawn: unknown[] = []
+  on('ui.render', { component: 'ToolUse' }, ($, e) => {
+    drawn.push((e.props.input as { description?: unknown }).description)
+    const { Box } = $.ui.resolve(e)
+    return <Box key="engine" />
+  })
+  await $.session.start(START)
+  await $.agent.spawn({
+    tool_use_id: 'tu-1',
+    prompt: 'look',
+    description: 'Find the bug',
+    subagentType: 'codex-relay:codex',
+    provider: { plugin: 'codex-relay', tier: 'user' },
+    parentModel: 'claude-opus-5-5',
+    background: false,
+    fork: false,
+  })
+
+  const id = spawned[0]!
+  const row = { tool_use_id: id, tool: 'Agent', input: { description: 'Find the bug', prompt: 'look' }, isRunning: true, isErrored: false, isInterrupted: false }
+  const ui = await $.ui.mount({ plugin: 'codex-relay', surface: 'terminal', component: 'ToolUse', props: row, requestId: id })
+  expect(drawn.at(-1)).toBe('Find the bug · gpt-5.6-terra')
+
+  const agents = { 'agent-1': { requestedModel: 'gpt-5.6-terra', resolvedModel: 'gpt-5.6-sol', effort: 'high', requests: 2 } }
+  answer = health({ session: { ...health().session, agents } })
+  await clock.advance(10000)
+  expect(drawn.at(-1)).toBe('Find the bug · Codex gpt-5.6-sol · high')
+  await ui.unmount()
+
+  // Another tool's row, and an Agent row this session never spawned, are drawn as they came
+  for (const props of [{ ...row, tool: 'Bash', input: { command: 'ls' } }, { ...row, tool_use_id: 'other' }]) {
+    const other = await $.ui.mount({ plugin: 'codex-relay', surface: 'terminal', component: 'ToolUse', props, requestId: props.tool_use_id })
+    expect(drawn.at(-1)).toBe(props.tool === 'Bash' ? undefined : 'Find the bug')
+    await other.unmount()
+  }
+})

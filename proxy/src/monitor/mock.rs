@@ -660,6 +660,7 @@ fn active_request(
     ActiveRequest {
         request_id: request_id.to_string(),
         session_id: session_id.map(str::to_string),
+        agent_id: None,
         session_seq,
         project: None,
         provider: None,
@@ -701,6 +702,7 @@ fn completed_request(
     CompletedRequest {
         request_id: request_id.to_string(),
         session_id: session_id.map(str::to_string),
+        agent_id: None,
         session_seq,
         project: None,
         provider: None,

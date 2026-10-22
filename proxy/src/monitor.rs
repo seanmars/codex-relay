@@ -79,6 +79,10 @@ pub enum MonitorEvent {
         request_id: String,
         project: String,
     },
+    AgentResolved {
+        request_id: String,
+        agent_id: String,
+    },
     SessionSequenceResolved {
         request_id: String,
         session_seq: u64,
@@ -139,6 +143,8 @@ pub enum MonitorEvent {
 pub struct ActiveRequest {
     pub request_id: String,
     pub session_id: Option<String>,
+    // The subagent that made the request (`x-claude-code-agent-id`); None for the main conversation
+    pub agent_id: Option<String>,
     pub session_seq: Option<u64>,
     pub project: Option<String>,
     pub provider: Option<String>,
@@ -185,6 +191,7 @@ impl ActiveRequest {
 pub struct CompletedRequest {
     pub request_id: String,
     pub session_id: Option<String>,
+    pub agent_id: Option<String>,
     pub session_seq: Option<u64>,
     pub project: Option<String>,
     pub provider: Option<String>,
@@ -390,6 +397,13 @@ impl MonitorHandle {
         });
     }
 
+    pub fn agent_resolved(&self, request_id: impl Into<String>, agent_id: impl Into<String>) {
+        self.publish(MonitorEvent::AgentResolved {
+            request_id: request_id.into(),
+            agent_id: agent_id.into(),
+        });
+    }
+
     pub fn session_sequence_resolved(&self, request_id: impl Into<String>, session_seq: u64) {
         self.publish(MonitorEvent::SessionSequenceResolved {
             request_id: request_id.into(),
@@ -524,6 +538,7 @@ impl MonitorStore {
                     ActiveRequest {
                         request_id,
                         session_id,
+                        agent_id: None,
                         session_seq,
                         project: None,
                         provider: None,
@@ -555,6 +570,14 @@ impl MonitorStore {
             } => {
                 if let Some(active) = self.active.get_mut(&request_id) {
                     active.project = Some(project);
+                }
+            }
+            MonitorEvent::AgentResolved {
+                request_id,
+                agent_id,
+            } => {
+                if let Some(active) = self.active.get_mut(&request_id) {
+                    active.agent_id = Some(agent_id);
                 }
             }
             MonitorEvent::SessionSequenceResolved {
@@ -800,6 +823,7 @@ impl MonitorStore {
             .unwrap_or_else(|| ActiveRequest {
                 request_id: request_id.to_string(),
                 session_id: None,
+                agent_id: None,
                 session_seq: None,
                 project: None,
                 provider: None,
@@ -835,6 +859,7 @@ impl MonitorStore {
         let completed = CompletedRequest {
             request_id: active.request_id,
             session_id: active.session_id,
+            agent_id: active.agent_id,
             session_seq: active.session_seq,
             project: active.project,
             provider: active.provider,
@@ -1428,6 +1453,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input
         CompletedRequest {
             request_id: request_id.to_string(),
             session_id: Some(session_id.to_string()),
+            agent_id: None,
             session_seq: None,
             project: None,
             provider: Some("codex".to_string()),

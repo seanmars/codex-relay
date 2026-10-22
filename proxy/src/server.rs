@@ -1583,6 +1583,9 @@ async fn dispatch_request(
         .map(std::string::ToString::to_string);
     if let Some(monitor) = state.monitor.as_ref() {
         monitor.request_started(&req_id, session_id.clone(), None, endpoint);
+        if let Some(ConversationIdentity::Agent(_, agent_id)) = conversation_identity.as_ref() {
+            monitor.agent_resolved(&req_id, agent_id);
+        }
     }
     let request_guard = RequestMonitorGuard::new(state.monitor.clone(), req_id.clone());
     let now = current_millis();

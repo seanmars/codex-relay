@@ -279,7 +279,7 @@ async function control(req, res, body) {
       defaultRoute: cfg.defaultRoute,
       agentModel: cfg.agentModel,
       pinnedSessions: Object.keys(state.sticky).length,
-      session: { sid, ...session, codex: L.sessionStats(monitor, sid) },
+      session: { sid, ...session, codex: L.sessionStats(monitor, sid), agents: L.agentStats(monitor, sid) },
       proxy: { port: cfg.proxyPort, command: cfg.proxyCommand, up: proxyUp, startedPid: proxyChild?.pid ?? null, error: proxyError },
       usage: cache.usage.value,
       usageError: cache.usage.error,

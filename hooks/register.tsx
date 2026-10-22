@@ -2,7 +2,7 @@
 // the status line and the codex-relay:codex agent type.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { Health, PanelUi, Route } from '../types'
+import type { Health, PanelUi, Route, Subagents } from '../types'
 import {
   AGENT_TYPE,
   COMMAND_WORDS,
@@ -22,11 +22,16 @@ import {
   startArgv,
   statusReport,
   statusText,
+  subagentLabel,
+  withCodex,
+  withSpawn,
+  withStep,
 } from './logic'
 import { panelTree, type PanelActions } from './panel'
 
 const panelUi = atom({ plugin: 'codex-relay', key: 'panelUi' } as const, { open: false, confirmingClaude: false, busy: false } satisfies PanelUi)
 const health = atom({ plugin: 'codex-relay', key: 'health' } as const, null)
+const subagents = atom({ plugin: 'codex-relay', key: 'subagents' } as const, {} satisfies Subagents)
 
 let ticking = false
 let lastStart = 0
@@ -136,6 +141,12 @@ async function contextPercent($: EngineInterface, h: Health | null): Promise<num
   return (await $.session.usage().catch(() => undefined))?.context.percent
 }
 
+// Writes only a change: every write redraws the Agent rows
+async function changeSubagents($: EngineInterface, fn: (all: Subagents) => Subagents): Promise<void> {
+  const all = await read($, subagents)
+  if (fn(all) !== all) await update($, subagents, fn)
+}
+
 async function publish($: EngineInterface, h: Health | null): Promise<void> {
   const text = foreignDir ? foreignStatusText(foreignDir) : statusText(h, await contextPercent($, h))
   if (text !== lastStatus) {
@@ -148,6 +159,7 @@ async function publish($: EngineInterface, h: Health | null): Promise<void> {
     lastHealthSig = sig
     await update($, health, () => h)
   }
+  if (h) await changeSubagents($, (all) => withCodex(all, h.session.agents))
 }
 
 async function tick($: EngineInterface): Promise<void> {
@@ -347,15 +359,35 @@ export const register: Register = (on) => {
     return next(e)
   })
 
-  // An explicit `model` on the Agent call would replace the agent type's own: Codex agents keep the Codex model
-  on('agent.spawn', ($, e, next) => {
-    if (e.fork || e.resume || e.subagentType !== AGENT_TYPE || !agentModel) return next(e)
-    return next({ ...e, model: agentModel })
+  // An explicit `model` on the Agent call would replace the agent type's own: Codex agents keep the Codex model.
+  // The row of the call then shows the agent's model; a workflow's agents share one call, so none of them is shown.
+  on('agent.spawn', async ($, e, next) => {
+    const keepCodex = !e.fork && !e.resume && e.subagentType === AGENT_TYPE && agentModel
+    const r = await next(keepCodex ? { ...e, model: agentModel } : e)
+    // A denied spawn has no model
+    const model = r.model
+    if (model && !e.workflow) await changeSubagents($, (all) => withSpawn(all, e.tool_use_id, r.agentId, model)).catch(() => {})
+    return r
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'codex-relay agent.spawn failed' }))
+
+  // Not awaited: the request goes out without waiting on the row
+  on('turn.step', async function* ($, e, next) {
+    const agentId = e.agentId
+    if (agentId) void changeSubagents($, (all) => withStep(all, agentId, e.model, e.effort)).catch(() => {})
+    return yield* next(e)
+  })
 
   on('command.run', { command: 'relay' }, async ($, e) => ({ text: await runCommand($, e.args) })).catch(() => ({
     text: '/relay 執行失敗',
   }))
+
+  // The row's description gains the agent's model and effort; what the model reads is unchanged
+  on('ui.render', { component: 'ToolUse', props: { tool: 'Agent' } }, async ($, e, next) => {
+    const label = subagentLabel((await read($, subagents))[e.props.tool_use_id])
+    const input = e.props.input as { description?: unknown } | null
+    if (!label || typeof input?.description !== 'string') return next(e)
+    return next({ ...e, props: { ...e.props, input: { ...input, description: `${input.description} · ${label}` } } })
+  })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const ui = await read($, panelUi)

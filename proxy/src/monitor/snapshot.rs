@@ -95,6 +95,9 @@ impl From<MonitorState> for MonitorSnapshot {
 pub struct ActiveSnapshot {
     pub request_id: String,
     pub session_id: Option<String>,
+    // Absent from a proxy before subagents were told apart
+    #[serde(default)]
+    pub agent_id: Option<String>,
     pub session_seq: Option<u64>,
     pub project: Option<String>,
     pub provider: Option<String>,
@@ -134,6 +137,7 @@ impl From<ActiveRequest> for ActiveSnapshot {
         Self {
             request_id: value.request_id,
             session_id: value.session_id,
+            agent_id: value.agent_id,
             session_seq: value.session_seq,
             project: value.project,
             provider: value.provider,
@@ -162,6 +166,8 @@ impl From<ActiveRequest> for ActiveSnapshot {
 pub struct CompletedSnapshot {
     pub request_id: String,
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
     pub session_seq: Option<u64>,
     pub project: Option<String>,
     pub provider: Option<String>,
@@ -199,6 +205,7 @@ impl From<CompletedRequest> for CompletedSnapshot {
         Self {
             request_id: value.request_id,
             session_id: value.session_id,
+            agent_id: value.agent_id,
             session_seq: value.session_seq,
             project: value.project,
             provider: value.provider,
@@ -365,6 +372,47 @@ mod tests {
         let contract: serde_json::Value = serde_json::from_str(contract).unwrap();
 
         assert_json_subset(&contract["monitor"], &actual, "$");
+    }
+
+    #[test]
+    fn monitor_response_names_the_subagent_of_each_request() {
+        let monitor = MonitorHandle::default();
+        let request = |id: &str, model: &str, resolved: &str, effort: &str| {
+            monitor.request_started(
+                id,
+                Some("sid-contract".into()),
+                None,
+                EndpointKind::Messages,
+            );
+            monitor.agent_resolved(id, "agent-contract");
+            monitor.provider_selected(id, "codex", model, Some(effort.into()));
+            monitor.model_resolved(id, resolved);
+        };
+        request("r-agent-done", "sonnet", "gpt-5.4", "medium");
+        monitor.request_completed("r-agent-done", 200, None, None);
+        request("r-agent-live", "gpt-5.6-terra", "gpt-5.6-terra", "high");
+
+        let actual = serde_json::to_value(MonitorResponse::from(monitor.snapshot())).unwrap();
+        let (_, contract) = MODEL_CONTRACT.split_once("export default").unwrap();
+        let contract: serde_json::Value = serde_json::from_str(contract).unwrap();
+
+        assert_json_subset(&contract["agents"]["monitor"], &actual, "$");
+    }
+
+    #[test]
+    fn a_request_from_a_proxy_without_agent_ids_decodes_as_the_main_conversation() {
+        let monitor = MonitorHandle::default();
+        monitor.request_started("r1", Some("s1".into()), None, EndpointKind::Messages);
+        monitor.agent_resolved("r1", "agent-a");
+        let mut legacy = serde_json::to_value(MonitorSnapshot::from(monitor.snapshot())).unwrap();
+        legacy["active"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("agent_id");
+
+        let decoded: MonitorSnapshot = serde_json::from_value(legacy).unwrap();
+
+        assert_eq!(decoded.active[0].agent_id, None);
     }
 
     #[test]
