@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>codex-relay 安裝指南</title>
+<style>
+  :root {
+    --paper: #faf8f4;
+    --card: #ffffff;
+    --ink: #1f2328;
+    --ink-soft: #57606a;
+    --line: #e6e1d8;
+    --accent: #c2410c;
+    --accent-soft: #fff1e8;
+    --code-bg: #f4f1ea;
+    --ok: #1a7f37;
+    --ok-soft: #e8f5ec;
+    --warn: #9a6700;
+    --warn-soft: #fff8e1;
+    --mono: "Cascadia Code", "JetBrains Mono", Consolas, "SFMono-Regular", Menlo, monospace;
+    --sans: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.75;
+  }
+  a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: .9em; background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+
+  /* Top bar with the OS switcher */
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(250, 248, 244, .92);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar-inner {
+    max-width: 1180px; margin: 0 auto; padding: 12px 24px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  }
+  .brand { font-weight: 700; letter-spacing: .02em; }
+  .brand span { color: var(--accent); }
+  .os-switch { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-soft); }
+  .os-switch button {
+    font: inherit; font-size: 14px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    padding: 4px 14px; border-radius: 999px;
+  }
+  .os-switch button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  .layout { max-width: 1180px; margin: 0 auto; padding: 32px 24px 96px; display: grid; grid-template-columns: 230px 1fr; gap: 48px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .toc { display: none; } }
+
+  .toc { position: sticky; top: 84px; align-self: start; font-size: 14px; }
+  .toc ol { list-style: none; margin: 0; padding: 0; counter-reset: toc; }
+  .toc li { counter-increment: toc; }
+  .toc a {
+    display: flex; gap: 10px; padding: 6px 10px; border-radius: 6px;
+    color: var(--ink-soft); text-decoration: none;
+  }
+  .toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--mono); color: var(--line); }
+  .toc a:hover { background: var(--card); color: var(--ink); }
+  .toc a.done { color: var(--ok); }
+  .toc a.done::before { content: "✓"; color: var(--ok); width: 1.3em; text-align: center; }
+  .toc .progress { margin: 0 10px 14px; font-size: 13px; color: var(--ink-soft); }
+  .toc .bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .toc .bar i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .2s; }
+
+  header.hero { margin-bottom: 40px; }
+  header.hero h1 { font-size: 34px; line-height: 1.3; margin: 0 0 12px; }
+  header.hero p { color: var(--ink-soft); margin: 0 0 8px; max-width: 46em; }
+  pre.diagram {
+    font-family: var(--mono); font-size: 13px; line-height: 1.6;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 20px; overflow-x: auto; margin: 20px 0 0;
+  }
+
+  section.step {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 28px 32px; margin-bottom: 28px;
+  }
+  @media (max-width: 600px) { section.step { padding: 20px 18px; } }
+  .step-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 8px; }
+  .step-no {
+    flex: none; width: 44px; height: 44px; border-radius: 12px;
+    background: var(--accent-soft); color: var(--accent);
+    display: grid; place-items: center; font-weight: 700; font-family: var(--mono); font-size: 18px;
+  }
+  section.step.done .step-no { background: var(--ok-soft); color: var(--ok); }
+  .step-head h2 { margin: 6px 0 0; font-size: 22px; line-height: 1.4; flex: 1; }
+  .step-head label { flex: none; margin-top: 10px; font-size: 13px; color: var(--ink-soft); cursor: pointer; user-select: none; display: flex; gap: 6px; align-items: center; }
+  .step-head input { width: 16px; height: 16px; accent-color: var(--ok); cursor: pointer; }
+  .step > p, .step > ul { color: var(--ink-soft); }
+  h3 { font-size: 16px; margin: 24px 0 8px; }
+
+  /* One command per block, each with its own copy button */
+  .cmd { margin: 14px 0 18px; }
+  .cmd-line {
+    display: flex; align-items: stretch;
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  }
+  .cmd-line .prompt { flex: none; padding: 10px 0 10px 14px; font-family: var(--mono); font-size: 14px; color: var(--accent); user-select: none; }
+  .cmd-line code {
+    flex: 1; background: none; padding: 10px 14px 10px 10px; font-size: 14px;
+    white-space: pre; overflow-x: auto; display: block;
+  }
+  .cmd-line button {
+    flex: none; font: inherit; font-size: 13px; cursor: pointer;
+    border: 0; border-left: 1px solid var(--line); background: var(--card); color: var(--ink-soft);
+    padding: 0 16px; min-width: 76px;
+  }
+  .cmd-line button:hover { color: var(--ink); background: #fff; }
+  .cmd-line button.copied { color: var(--ok); }
+  .cmd .why { margin: 6px 2px 0; font-size: 14.5px; color: var(--ink-soft); }
+  .cmd .why b { color: var(--ink); font-weight: 600; }
+  .cmd.slash .prompt { color: #6639ba; }
+
+  .os-tag {
+    display: inline-block; font-size: 12px; font-family: var(--mono);
+    padding: 0 8px; border-radius: 4px; background: var(--code-bg); color: var(--ink-soft); margin-bottom: 4px;
+  }
+  [data-os] { display: none; }
+  body[data-os-current="win"] [data-os~="win"],
+  body[data-os-current="mac"] [data-os~="mac"],
+  body[data-os-current="linux"] [data-os~="linux"] { display: block; }
+
+  .note, .warn, .ok-box {
+    border-radius: 8px; padding: 12px 16px; margin: 16px 0; font-size: 14.5px;
+  }
+  .note { background: #f1f5fb; border-left: 3px solid #3b6fb6; }
+  .warn { background: var(--warn-soft); border-left: 3px solid var(--warn); }
+  .ok-box { background: var(--ok-soft); border-left: 3px solid var(--ok); }
+  .note p, .warn p, .ok-box p { margin: 0; }
+  .expect {
+    font-family: var(--mono); font-size: 13px; white-space: pre; overflow-x: auto;
+    background: #fbfaf7; border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px; margin: 6px 0 0; color: var(--ink-soft);
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin: 12px 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; background: #fbfaf7; }
+  td code { white-space: nowrap; }
+
+  footer { color: var(--ink-soft); font-size: 13px; text-align: center; margin-top: 48px; }
+</style>
+</head>
+<body data-os-current="win">
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">codex<span>-</span>relay 安裝指南</div>
+    <div class="os-switch" role="group" aria-label="選擇作業系統">
+      你的作業系統:
+      <button type="button" data-pick="win">Windows</button>
+      <button type="button" data-pick="mac">macOS</button>
+      <button type="button" data-pick="linux">Linux</button>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+  <nav class="toc" aria-label="步驟">
+    <div class="progress"><span id="progress-text">完成 0 / 0</span><div class="bar"><i id="progress-bar"></i></div></div>
+    <ol id="toc-list"></ol>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <h1>一步一步安裝 codex-relay</h1>
+      <p>codex-relay 讓每個 Claude Code 視窗各自選擇走 Claude 或 OpenAI Codex. 安裝分成兩部分: Rust 寫的 <code>claude-code-proxy</code>, 以及 Claude Code plugin.</p>
+      <p>請依照順序執行每個步驟. 每個指令都有自己的「複製」按鈕, 一次只複製一行. 請先在右上角選擇你的作業系統.</p>
+      <pre class="diagram">Claude Code ── ANTHROPIC_BASE_URL ──▶ relay (Node, 127.0.0.1:8960)
+                                        ├─ session = claude ─▶ api.anthropic.com
+                                        └─ session = codex  ─▶ claude-code-proxy (Rust, 127.0.0.1:8970)
+                                                                 └─▶ chatgpt.com/backend-api/codex</pre>
+    </header>
+
+    <!-- 01 -->
+    <section class="step" id="check" data-title="檢查現有工具">
+      <div class="step-head"><div class="step-no">01</div><h2>檢查現有工具</h2><label><input type="checkbox">完成</label></div>
+      <p>先確認電腦上已經有哪些工具. 開啟終端機, 逐行執行下面的指令.</p>
+      <p data-os="win">Windows 請使用 <b>PowerShell</b> 或 Windows Terminal.</p>
+
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>node --version</code><button type="button">複製</button></div>
+        <p class="why">顯示 Node.js 的版本. <b>需要 v20 以上.</b> Relay 和 plugin 都用 Node 執行.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>git --version</code><button type="button">複製</button></div>
+        <p class="why">確認 Git 已經安裝. 步驟 05 用 Git 下載原始碼.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude --version</code><button type="button">複製</button></div>
+        <p class="why">顯示 Claude Code 的版本. <b>需要支援 plugin hooks module 的版本</b> (已在 2.1.306 測試).</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>cargo --version</code><button type="button">複製</button></div>
+        <p class="why">確認 Rust toolchain 已經安裝. 步驟 05 用 cargo 編譯 proxy.</p>
+      </div>
+      <div class="note"><p>任何一行顯示「找不到指令」或版本太舊, 請在後面的步驟安裝它. 全部都已經就緒時, 可以直接跳到 <a href="#codex">步驟 04</a>.</p></div>
+    </section>
+
+    <!-- 02 -->
+    <section class="step" id="base" data-title="安裝 Node.js, Git, Claude Code">
+      <div class="step-head"><div class="step-no">02</div><h2>安裝 Node.js, Git 與 Claude Code</h2><label><input type="checkbox">完成</label></div>
+      <p>只安裝步驟 01 中缺少的工具. 已經有的工具請略過.</p>
+
+      <div data-os="win">
+        <span class="os-tag">Windows</span>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">PS&gt;</span><code>winget install OpenJS.NodeJS.LTS</code><button type="button">複製</button></div>
+          <p class="why">用 Windows 內建的 winget 安裝 Node.js LTS 版本. 也會一併安裝 <code>npm</code>.</p>
+        </div>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">PS&gt;</span><code>winget install Git.Git</code><button type="button">複製</button></div>
+          <p class="why">安裝 Git for Windows.</p>
+        </div>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">PS&gt;</span><code>irm https://claude.ai/install.ps1 | iex</code><button type="button">複製</button></div>
+          <p class="why">下載並執行 Claude Code 的官方安裝程式. <code>irm</code> 下載腳本, <code>iex</code> 執行它.</p>
+        </div>
+      </div>
+
+      <div data-os="mac">
+        <span class="os-tag">macOS</span>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>brew install node</code><button type="button">複製</button></div>
+          <p class="why">用 Homebrew 安裝 Node.js 與 <code>npm</code>. 沒有 Homebrew 時, 請先依照 <a href="https://brew.sh" target="_blank" rel="noopener">brew.sh</a> 安裝.</p>
+        </div>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>brew install git</code><button type="button">複製</button></div>
+          <p class="why">安裝 Git.</p>
+        </div>
+      </div>
+
+      <div data-os="linux">
+        <span class="os-tag">Linux (Debian / Ubuntu)</span>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>sudo apt update</code><button type="button">複製</button></div>
+          <p class="why">更新 apt 的套件清單.</p>
+        </div>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>sudo apt install -y git</code><button type="button">複製</button></div>
+          <p class="why">安裝 Git. <code>-y</code> 自動回答「是」.</p>
+        </div>
+        <div class="warn"><p>發行版內建的 Node.js 版本常常低於 v20. 請到 <a href="https://nodejs.org/en/download" target="_blank" rel="noopener">nodejs.org/en/download</a> 選擇 Linux, 依照頁面上的指令安裝 v20 以上的版本.</p></div>
+      </div>
+
+      <div data-os="mac linux">
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>curl -fsSL https://claude.ai/install.sh | bash</code><button type="button">複製</button></div>
+          <p class="why">下載並執行 Claude Code 的官方安裝程式.</p>
+        </div>
+      </div>
+
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude update</code><button type="button">複製</button></div>
+        <p class="why">Claude Code 已經安裝但版本太舊時, 用這行更新到最新版.</p>
+      </div>
+      <div class="warn"><p>安裝完成後, <b>關閉並重新開啟終端機</b>. 新的終端機才會讀到更新後的 PATH. 然後重新執行步驟 01 的指令確認.</p></div>
+    </section>
+
+    <!-- 03 -->
+    <section class="step" id="rust" data-title="安裝 Rust toolchain">
+      <div class="step-head"><div class="step-no">03</div><h2>安裝 Rust toolchain</h2><label><input type="checkbox">完成</label></div>
+      <p>Proxy 用 Rust 撰寫. 你需要 cargo 從原始碼編譯它. Rust 也需要系統的 C linker.</p>
+
+      <div data-os="win">
+        <span class="os-tag">Windows</span>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">PS&gt;</span><code>winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"</code><button type="button">複製</button></div>
+          <p class="why">安裝 Visual Studio Build Tools 的 C++ 工作負載. Rust 在 Windows 使用 MSVC 的 linker. <code>--override</code> 後面的參數只選擇 C++ build tools. 已經安裝 Visual Studio C++ 開發工具時, 請略過這行.</p>
+        </div>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">PS&gt;</span><code>winget install Rustlang.Rustup</code><button type="button">複製</button></div>
+          <p class="why">安裝 rustup. rustup 管理 Rust 的版本, 並安裝 <code>rustc</code> 和 <code>cargo</code>.</p>
+        </div>
+        <div class="warn"><p><b>關閉並重新開啟 PowerShell</b>, 讓 PATH 包含 <code>%USERPROFILE%\.cargo\bin</code>.</p></div>
+      </div>
+
+      <div data-os="mac">
+        <span class="os-tag">macOS</span>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>xcode-select --install</code><button type="button">複製</button></div>
+          <p class="why">安裝 Apple Command Line Tools, 內含 C compiler 和 linker. 如果顯示「already installed」, 代表已經安裝, 可以繼續.</p>
+        </div>
+      </div>
+
+      <div data-os="linux">
+        <span class="os-tag">Linux (Debian / Ubuntu)</span>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>sudo apt install -y build-essential curl</code><button type="button">複製</button></div>
+          <p class="why">安裝 C compiler, linker 和 curl. 其他發行版請安裝對應的套件, 例如 Fedora 的 <code>gcc</code>.</p>
+        </div>
+      </div>
+
+      <div data-os="mac linux">
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</code><button type="button">複製</button></div>
+          <p class="why">下載並執行 rustup 的官方安裝腳本. 出現選單時, 按 <b>Enter</b> 選擇預設安裝.</p>
+        </div>
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>. "$HOME/.cargo/env"</code><button type="button">複製</button></div>
+          <p class="why">把 <code>~/.cargo/bin</code> 加進目前終端機的 PATH. 新開的終端機會自動載入, 不需要再執行.</p>
+        </div>
+      </div>
+
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>cargo --version</code><button type="button">複製</button></div>
+        <p class="why">確認 cargo 可以執行. 看到版本號碼代表 Rust 已經就緒.</p>
+      </div>
+    </section>
+
+    <!-- 04 -->
+    <section class="step" id="codex" data-title="安裝 Codex CLI 並登入">
+      <div class="step-head"><div class="step-no">04</div><h2>安裝 Codex CLI 並登入 ChatGPT</h2><label><input type="checkbox">完成</label></div>
+      <p>Proxy 預設使用 Codex CLI 的 ChatGPT 登入. 你需要一個有 Codex 使用權的 ChatGPT 帳號.</p>
+
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>npm install -g @openai/codex</code><button type="button">複製</button></div>
+        <p class="why">用 npm 全域安裝 OpenAI 的 Codex CLI. 安裝後可以在任何目錄執行 <code>codex</code>.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>codex login</code><button type="button">複製</button></div>
+        <p class="why">開啟瀏覽器, 用 ChatGPT 帳號登入. 登入憑證會存在 <code>~/.codex/auth.json</code>. Proxy 會讀取這個檔案, 不需要另外登入.</p>
+      </div>
+    </section>
+
+    <!-- 05 -->
+    <section class="step" id="proxy" data-title="安裝 proxy">
+      <div class="step-head"><div class="step-no">05</div><h2>下載原始碼並安裝 proxy</h2><label><input type="checkbox">完成</label></div>
+      <p>這個步驟從原始碼編譯 <code>claude-code-proxy</code>, 並把它放進 PATH.</p>
+
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>git clone https://github.com/seanmars/codex-relay.git</code><button type="button">複製</button></div>
+        <p class="why">把 codex-relay 的原始碼下載到目前目錄下的 <code>codex-relay</code> 資料夾.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>cd codex-relay</code><button type="button">複製</button></div>
+        <p class="why">進入剛剛下載的資料夾. 後面的指令要在這裡執行.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>cargo install --path proxy</code><button type="button">複製</button></div>
+        <p class="why">編譯 <code>proxy/</code> 資料夾裡的 Rust 專案, 並把執行檔安裝到 <code>~/.cargo/bin</code>. <b>第一次編譯需要幾分鐘.</b> 如果已經安裝上游的 claude-code-proxy, 這行會取代它.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude-code-proxy --version</code><button type="button">複製</button></div>
+        <p class="why">確認 proxy 已經安裝, 而且在 PATH 裡.</p>
+        <div class="expect">claude-code-proxy 0.1.45</div>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude-code-proxy codex auth status</code><button type="button">複製</button></div>
+        <p class="why">確認 proxy 讀得到步驟 04 的 Codex 登入. 顯示「Not authenticated」時, 請重新執行 <code>codex login</code>.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude-code-proxy codex usage</code><button type="button">複製</button></div>
+        <p class="why">顯示 ChatGPT 方案的 Codex 用量上限. 能顯示用量, 代表登入憑證有效.</p>
+      </div>
+      <div class="note"><p>你不需要手動啟動 proxy. Relay 在需要 Codex 時會自動啟動它.</p></div>
+    </section>
+
+    <!-- 06 -->
+    <section class="step" id="plugin" data-title="安裝 Claude Code plugin">
+      <div class="step-head"><div class="step-no">06</div><h2>安裝 Claude Code plugin</h2><label><input type="checkbox">完成</label></div>
+      <p>Plugin 提供 <code>/relay</code> 指令, 面板, statusline 和 <code>codex-relay:codex</code> subagent. 它在 session 開始時自動啟動 relay.</p>
+
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude plugin marketplace add seanmars/codex-relay</code><button type="button">複製</button></div>
+        <p class="why">把 GitHub 上的 <code>seanmars/codex-relay</code> 加入 Claude Code 的 marketplace 清單. Claude Code 從這個 repo 讀取 plugin.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude plugin install codex-relay@codex-relay</code><button type="button">複製</button></div>
+        <p class="why">安裝 plugin. 格式是 <code>plugin 名稱@marketplace 名稱</code>, 這裡兩者都是 <code>codex-relay</code>.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude plugin list</code><button type="button">複製</button></div>
+        <p class="why">列出已安裝的 plugin. 確認清單中有 <code>codex-relay</code>, 而且狀態是 enabled.</p>
+      </div>
+      <div class="note"><p>Plugin 只對<b>目前的 session</b> 設定 <code>ANTHROPIC_BASE_URL</code>. 它不會修改 <code>settings.json</code>. Relay 沒有回應時, session 會使用原本的位址.</p></div>
+    </section>
+
+    <!-- 07 -->
+    <section class="step" id="verify" data-title="驗證安裝">
+      <div class="step-head"><div class="step-no">07</div><h2>開啟 Claude Code 並驗證</h2><label><input type="checkbox">完成</label></div>
+      <p>下面第一行在終端機執行. 其他以 <code>/</code> 開頭的指令, 請在 Claude Code 的輸入框裡執行.</p>
+
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude</code><button type="button">複製</button></div>
+        <p class="why">開啟新的 Claude Code session. Plugin 在 session 開始時啟動 relay. <b>安裝 plugin 之前就開啟的 session 不會載入 plugin.</b></p>
+      </div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay status</code><button type="button">複製</button></div>
+        <p class="why">顯示這個 session 的路由, relay, proxy 和 Codex 用量. 確認 <code>Relay:</code> 這一行有 pid 和版本號碼.</p>
+        <div class="expect">這個視窗: Claude (尚未送出 request, 將使用預設)
+新 session 預設: Claude
+Relay: http://127.0.0.1:8960 (pid ..., 0.1.0, 固定的 session: 0)
+Codex proxy: 未執行 127.0.0.1:8970 (claude-code-proxy)</div>
+      </div>
+      <div class="note"><p>Proxy 在第一次切到 Codex 時才會啟動. 所以這時 proxy 顯示 <code>未執行</code> 是正常的.</p></div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay codex</code><button type="button">複製</button></div>
+        <p class="why">把<b>這個視窗</b>切換到 Codex. Relay 會在這時啟動 proxy. 其他視窗不受影響.</p>
+      </div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay status</code><button type="button">複製</button></div>
+        <p class="why">再檢查一次. 這次 proxy 應該顯示 <code>執行中</code>.</p>
+      </div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay models</code><button type="button">複製</button></div>
+        <p class="why">列出你的帳號可以使用的 Codex model, 以及 proxy 是否支援每個 model.</p>
+      </div>
+      <div class="ok-box"><p>送出一則訊息. Statusline 顯示類似 <code>⇄ Codex gpt-5.6-terra · ctx 42% · 5h 23% · 週 41%</code> 時, 安裝就完成了.</p></div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay claude</code><button type="button">複製</button></div>
+        <p class="why">把這個視窗切回 Claude.</p>
+      </div>
+    </section>
+
+    <!-- 08 -->
+    <section class="step" id="usage" data-title="常用指令">
+      <div class="step-head"><div class="step-no">08</div><h2>常用指令</h2><label><input type="checkbox">讀完</label></div>
+      <p>下面的指令都在 Claude Code 輸入框裡執行.</p>
+
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay</code><button type="button">複製</button></div>
+        <p class="why">開啟面板. 按 <code>ctrl+x tab</code> 聚焦面板, 再按按鈕上標示的鍵.</p>
+      </div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay default codex</code><button type="button">複製</button></div>
+        <p class="why">讓<b>新的</b> session 預設走 Codex. 已經開始的對話不會換路徑, 也不會重建 prompt cache. 改回來請用 <code>/relay default claude</code>.</p>
+      </div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay usage</code><button type="button">複製</button></div>
+        <p class="why">顯示 Codex 方案的用量上限 (5 小時與每週).</p>
+      </div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay models --full</code><button type="button">複製</button></div>
+        <p class="why">列出所有 Codex model, 包含帳號隱藏的 model.</p>
+      </div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay auth status</code><button type="button">複製</button></div>
+        <p class="why">顯示 Codex 的登入狀態.</p>
+      </div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay auth login</code><button type="button">複製</button></div>
+        <p class="why">開啟瀏覽器重新登入. 無法開啟瀏覽器時 (例如透過 SSH), 改用 <code>/relay auth device</code>.</p>
+      </div>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay monitor</code><button type="button">複製</button></div>
+        <p class="why">顯示開啟 monitor TUI 的指令. Monitor 是全螢幕畫面, 請在另一個終端機執行它.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude-code-proxy monitor --url http://127.0.0.1:8970</code><button type="button">複製</button></div>
+        <p class="why">在另一個終端機執行. 連到執行中的 proxy, 即時顯示 request 和用量. 這是唯讀畫面. 有修改 <code>proxyPort</code> 時, 請換成你的 port.</p>
+      </div>
+
+      <h3>Subagent</h3>
+      <p class="why" style="color:var(--ink-soft)">主對話可以留在 Claude. 使用 <code>codex-relay:codex</code> agent type 的 subagent 會在 Codex 上執行, model 由設定中的 <code>agentModel</code> 指定.</p>
+    </section>
+
+    <!-- 09 -->
+    <section class="step" id="config" data-title="設定 (選用)">
+      <div class="step-head"><div class="step-no">09</div><h2>設定 (選用)</h2><label><input type="checkbox">讀完</label></div>
+      <p>預設值通常就能使用. 需要修改時, 編輯 <code>~/.claude/codex-relay.json</code>. 有設定 <code>CLAUDE_CONFIG_DIR</code> 時, 檔案放在該目錄. 檔案不存在時使用預設值.</p>
+      <table>
+        <thead><tr><th>欄位</th><th>預設值</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>port</code></td><td><code>8960</code></td><td>Relay 的 port</td></tr>
+          <tr><td><code>proxyPort</code></td><td><code>8970</code></td><td>Proxy 的 port</td></tr>
+          <tr><td><code>proxyCommand</code></td><td><code>"claude-code-proxy"</code></td><td>Proxy 的執行檔名稱或完整路徑</td></tr>
+          <tr><td><code>defaultRoute</code></td><td><code>"claude"</code></td><td>新 session 的路由: <code>"claude"</code> 或 <code>"codex"</code></td></tr>
+          <tr><td><code>agentModel</code></td><td><code>"gpt-5.6-terra"</code></td><td><code>codex-relay:codex</code> subagent 使用的 model</td></tr>
+          <tr><td><code>claudeUrl</code></td><td><code>"https://api.anthropic.com"</code></td><td>Claude 路由的上游位址</td></tr>
+          <tr><td><code>nodePath</code></td><td><code>"node"</code></td><td>啟動 relay 使用的 Node 執行檔</td></tr>
+        </tbody>
+      </table>
+      <div class="note"><p>修改設定後, 在 Claude Code 執行 <code>/relay restart</code> 讓 relay 讀取新設定. 修改 <code>proxyPort</code> 或 <code>proxyCommand</code> 時, 改用 <code>/relay restart --proxy</code>.</p></div>
+    </section>
+
+    <!-- 10 -->
+    <section class="step" id="trouble" data-title="疑難排解">
+      <div class="step-head"><div class="step-no">10</div><h2>疑難排解</h2><label><input type="checkbox">讀完</label></div>
+
+      <h3>Relay 或 proxy 沒有回應</h3>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay restart --proxy</code><button type="button">複製</button></div>
+        <p class="why">停止 relay 和 proxy, 然後重新啟動 relay. Proxy 會在下一次需要 Codex 時啟動.</p>
+      </div>
+
+      <h3>查看 relay 的 log</h3>
+      <div data-os="win">
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">PS&gt;</span><code>Get-Content "$env:USERPROFILE\.claude\codex-relay.log" -Tail 50</code><button type="button">複製</button></div>
+          <p class="why">顯示 relay log 的最後 50 行. Log 超過 5 MB 時會被清空.</p>
+        </div>
+      </div>
+      <div data-os="mac linux">
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>tail -n 50 ~/.claude/codex-relay.log</code><button type="button">複製</button></div>
+          <p class="why">顯示 relay log 的最後 50 行. Log 超過 5 MB 時會被清空.</p>
+        </div>
+      </div>
+
+      <h3>查看 proxy 的 log</h3>
+      <div data-os="win">
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">PS&gt;</span><code>Get-Content "$env:LOCALAPPDATA\claude-code-proxy\proxy.log" -Tail 50</code><button type="button">複製</button></div>
+          <p class="why">顯示 proxy log 的最後 50 行. Codex 回傳錯誤時, 原因通常記在這裡.</p>
+        </div>
+      </div>
+      <div data-os="mac linux">
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>tail -n 50 ~/.local/state/claude-code-proxy/proxy.log</code><button type="button">複製</button></div>
+          <p class="why">顯示 proxy log 的最後 50 行. 有設定 <code>XDG_STATE_HOME</code> 時, log 在該目錄下的 <code>claude-code-proxy/</code>.</p>
+        </div>
+      </div>
+
+      <h3>/relay status 顯示 proxy 錯誤, 或找不到 claude-code-proxy</h3>
+      <div data-os="win">
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">PS&gt;</span><code>(Get-Command claude-code-proxy).Source</code><button type="button">複製</button></div>
+          <p class="why">顯示 proxy 執行檔的完整路徑. 沒有輸出代表它不在 PATH 裡.</p>
+        </div>
+      </div>
+      <div data-os="mac linux">
+        <div class="cmd">
+          <div class="cmd-line"><span class="prompt">$</span><code>command -v claude-code-proxy</code><button type="button">複製</button></div>
+          <p class="why">顯示 proxy 執行檔的完整路徑. 沒有輸出代表它不在 PATH 裡.</p>
+        </div>
+      </div>
+      <p style="color:var(--ink-soft)">找不到時, 請重新開啟終端機和 Claude Code. 還是找不到時, 把 <code>proxyCommand</code> 設為執行檔的完整路徑 (見步驟 09).</p>
+
+      <h3>已經使用 model-relay</h3>
+      <p style="color:var(--ink-soft)">兩者都會設定 <code>ANTHROPIC_BASE_URL</code>. 啟用這個 plugin 後, session 改走 codex-relay. 要讓 Claude 路由繼續經過 model-relay, 把 <code>claudeUrl</code> 設為 model-relay 的位址.</p>
+    </section>
+
+    <!-- 11 -->
+    <section class="step" id="update" data-title="更新與移除">
+      <div class="step-head"><div class="step-no">11</div><h2>更新與移除</h2><label><input type="checkbox">讀完</label></div>
+
+      <h3>更新 proxy</h3>
+      <p style="color:var(--ink-soft)">在步驟 05 下載的 <code>codex-relay</code> 資料夾中執行.</p>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>git pull</code><button type="button">複製</button></div>
+        <p class="why">下載最新的原始碼.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>cargo install --path proxy --force</code><button type="button">複製</button></div>
+        <p class="why">重新編譯並覆蓋已安裝的 proxy. <code>--force</code> 讓 cargo 在版本號碼相同時也重新安裝.</p>
+      </div>
+
+      <h3>更新 plugin</h3>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude plugin marketplace update codex-relay</code><button type="button">複製</button></div>
+        <p class="why">從 GitHub 讀取 marketplace 的最新內容.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude plugin update codex-relay@codex-relay</code><button type="button">複製</button></div>
+        <p class="why">把 plugin 更新到最新版本. 更新後請重新開啟 Claude Code. 新 session 會自動重新啟動舊版的 relay.</p>
+      </div>
+
+      <h3>移除</h3>
+      <div class="cmd slash">
+        <div class="cmd-line"><span class="prompt">&gt;</span><code>/relay stop --proxy</code><button type="button">複製</button></div>
+        <p class="why">在 Claude Code 中執行. 停止 relay 和 proxy, 讓後面的移除步驟不會被執行中的程式擋住.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude plugin uninstall codex-relay@codex-relay</code><button type="button">複製</button></div>
+        <p class="why">移除 plugin.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>claude plugin marketplace remove codex-relay</code><button type="button">複製</button></div>
+        <p class="why">從 marketplace 清單移除 codex-relay.</p>
+      </div>
+      <div class="cmd">
+        <div class="cmd-line"><span class="prompt">$</span><code>cargo uninstall claude-code-proxy</code><button type="button">複製</button></div>
+        <p class="why">刪除 cargo 安裝的 proxy 執行檔.</p>
+      </div>
+      <div class="note"><p>設定檔 <code>~/.claude/codex-relay.json</code>, 路由狀態 <code>~/.claude/codex-relay-state.json</code> 和 log 不會自動刪除. 不再需要時, 請手動刪除.</p></div>
+    </section>
+
+    <footer>codex-relay · <a href="https://github.com/seanmars/codex-relay" target="_blank" rel="noopener">github.com/seanmars/codex-relay</a></footer>
+  </main>
+</div>
+
+<script>
+(() => {
+  const store = {
+    get: (k) => { try { return localStorage.getItem(k) } catch { return null } },
+    set: (k, v) => { try { localStorage.setItem(k, v) } catch {} },
+  }
+
+  // OS switcher: remembered choice, else a guess from the user agent
+  const guessOs = () => {
+    const ua = navigator.userAgent
+    if (/Windows/i.test(ua)) return 'win'
+    if (/Mac/i.test(ua)) return 'mac'
+    return 'linux'
+  }
+  const pickOs = (os) => {
+    document.body.dataset.osCurrent = os
+    document.querySelectorAll('[data-pick]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pick === os)))
+    store.set('codex-relay-install-os', os)
+  }
+  document.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => pickOs(b.dataset.pick)))
+  pickOs(store.get('codex-relay-install-os') || guessOs())
+
+  // Copy one command line; navigator.clipboard is missing on some file:// pages, so fall back to execCommand
+  const copyText = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      ta.remove()
+      return ok
+    }
+  }
+  document.querySelectorAll('.cmd-line button').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const text = btn.parentElement.querySelector('code').textContent.trim()
+      const ok = await copyText(text)
+      btn.textContent = ok ? '已複製' : '複製失敗'
+      btn.classList.toggle('copied', ok)
+      setTimeout(() => {
+        btn.textContent = '複製'
+        btn.classList.remove('copied')
+      }, 1500)
+    })
+  })
+
+  // Table of contents and progress, saved per step id
+  const steps = [...document.querySelectorAll('section.step')]
+  const toc = document.getElementById('toc-list')
+  const links = steps.map((s) => {
+    const li = document.createElement('li')
+    const a = document.createElement('a')
+    a.href = `#${s.id}`
+    a.textContent = s.dataset.title
+    li.appendChild(a)
+    toc.appendChild(li)
+    return a
+  })
+  const done = new Set(JSON.parse(store.get('codex-relay-install-done') || '[]'))
+  const render = () => {
+    steps.forEach((s, i) => {
+      const on = done.has(s.id)
+      s.classList.toggle('done', on)
+      s.querySelector('.step-head input').checked = on
+      links[i].classList.toggle('done', on)
+    })
+    document.getElementById('progress-text').textContent = `完成 ${done.size} / ${steps.length}`
+    document.getElementById('progress-bar').style.width = `${(done.size / steps.length) * 100}%`
+  }
+  steps.forEach((s) => {
+    s.querySelector('.step-head input').addEventListener('change', (e) => {
+      e.target.checked ? done.add(s.id) : done.delete(s.id)
+      store.set('codex-relay-install-done', JSON.stringify([...done]))
+      render()
+    })
+  })
+  render()
+})()
+</script>
+</body>
+</html>
