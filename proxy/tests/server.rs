@@ -388,7 +388,10 @@ async fn healthz_returns_ok() {
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap();
-    assert_eq!(body, json!({"ok": true}));
+    assert_eq!(body["ok"], json!(true));
+    // The config's Codex overrides: their values depend on this machine's env and config.json
+    let codex = body["codex"].as_object().expect("codex overrides");
+    assert!(codex.contains_key("model") && codex.contains_key("effort"));
 }
 
 #[tokio::test]

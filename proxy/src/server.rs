@@ -425,8 +425,12 @@ async fn handler_monitor(
     }
 }
 
+/// Liveness, and the Codex model and effort the config forces on every
+/// request (null when unset), so a client can show what an agent will run on
+/// before its first request.
 async fn healthz() -> Json<serde_json::Value> {
-    Json(json!({ "ok": true }))
+    let codex = crate::config::codex_request_config();
+    Json(json!({ "ok": true, "codex": { "model": codex.model, "effort": codex.effort } }))
 }
 
 #[derive(serde::Deserialize)]
