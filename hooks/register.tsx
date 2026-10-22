@@ -120,7 +120,11 @@ async function pointSession($: EngineInterface, cfg: LocalCfg, up: boolean): Pro
   if (up && current !== url) {
     if (!savedBaseUrl) {
       savedBaseUrl = { value: current }
-      if (current) $.ui.toast(`codex-relay: ANTHROPIC_BASE_URL 原本是 ${current}, 這個 session 改走 ${url}. Claude 路由會直連 Anthropic.`)
+      // The hook runs after the first request of the session (quota_check), which still goes to the old address
+      if (current)
+        $.ui.toast(
+          `codex-relay: ANTHROPIC_BASE_URL 原本是 ${current}, 這個 session 改走 ${url}. Claude 路由會直連 Anthropic. 啟動時的第一個 request 仍會送到 ${current}; 不再使用它時, 從 settings.json 的 env 或環境變數移除.`,
+        )
     }
     await $.env.set('ANTHROPIC_BASE_URL', url)
   } else if (!up && current === url) {

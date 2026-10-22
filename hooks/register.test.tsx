@@ -82,7 +82,7 @@ test('with the relay up, the session goes through it and the status line shows t
   await $.session.start(START)
 
   expect(env.ANTHROPIC_BASE_URL).toBe(RELAY)
-  expect(seen.toasts.some((t) => t.includes('http://127.0.0.1:8950'))).toBe(true)
+  expect(seen.toasts.some((t) => t.includes('http://127.0.0.1:8950') && t.includes('settings.json'))).toBe(true)
   expect(seen.statuses.at(-1)).toBe('⇄ Codex gpt-5.6-terra · ctx 42% · 5h 23% · 週 41%')
   expect(seen.agents).toEqual([expect.objectContaining({ name: 'codex', model: 'gpt-5.6-terra' })])
 })
