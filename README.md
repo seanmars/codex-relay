@@ -104,10 +104,11 @@ Prompt 下方的背景 agent 清單會在 description 後面加上這組 model �
 
 ### Statusline
 
-範例: `⚠ codex-relay: ⇄ Codex gpt-5.6-terra · ctx 42% · 5h 23% · 週 41%`.
+範例: `⚠ codex-relay: ⇄ Codex gpt-5.6-terra · high · ctx 42% · 5h 23% · 週 41%`.
 
 - `⚠ codex-relay:` 是 Claude Code 加上的前綴.
-- `Codex` 後面是實際回應的 model. Proxy 還沒解析出 model 時, 顯示 request 要求的 model.
+- `Codex` 後面是實際回應的 model 和 effort. Proxy 還沒解析出 model 時, 顯示 request 要求的 model.
+- 這個視窗走 Claude 時, 顯示 `Claude`. 這個 session 的 subagent 使用過 Codex 時, 後面加上最近一次的 model 和 effort, 例如 `Claude · Codex agent gpt-5.6-terra · xhigh`.
 - `ctx` 是這個 session 的 context window 使用率.
 - `5h` 和 `週` 是方案的用量視窗. 達到上限時顯示 `已達上限`.
 - Relay 沒有回應時顯示 `codex-relay 離線: 直連 Claude`.

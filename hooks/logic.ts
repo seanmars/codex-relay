@@ -192,19 +192,26 @@ function resetIn(w: UsageWindow, nowSec: number): string {
 
 export const RELAY_ICON = '⇄'
 
-// One line under the prompt: where this window goes and, on Codex, how full its context is and what the plan has used
+// One line under the prompt: where this window goes and the model and effort Codex last answered it with. On Claude
+// those are its Codex agents'; on Codex, the line adds how full its context is and what the plan has used.
 export function statusText(h: Health | null, contextPercent?: number): string {
   return `${RELAY_ICON} ${statusBody(h, contextPercent)}`
 }
 
 export const foreignStatusText = (dir: string) => `${RELAY_ICON} port 屬於 ${dir} 的 relay: 直連 Claude`
 
+const codexLabel = (c: CodexStats | null) => [answeringModel(c), c?.effort].filter(Boolean).join(' · ')
+
 function statusBody(h: Health | null, contextPercent?: number): string {
   if (!h) return 'codex-relay 離線: 直連 Claude'
-  if (h.session.route === 'claude') return h.defaultRoute === 'codex' ? 'Claude (此視窗) · 新 session 預設 Codex' : 'Claude'
+  if (h.session.route === 'claude') {
+    const route = h.defaultRoute === 'codex' ? 'Claude (此視窗) · 新 session 預設 Codex' : 'Claude'
+    const agents = codexLabel(h.session.codex)
+    return agents ? `${route} · Codex agent ${agents}` : route
+  }
   if (h.proxy.error && !h.proxy.up) return `Codex: proxy 無法啟動 (${h.proxy.error.slice(0, 60)})`
   const c = h.session.codex
-  const parts = [`Codex ${answeringModel(c)}`.trim()]
+  const parts = [`Codex ${codexLabel(c)}`.trim()]
   if (contextPercent !== undefined) parts.push(`ctx ${Math.round(contextPercent)}%`)
   if (h.usage) {
     const windows = usageWindows(h.usage).map((w) => `${windowLabel(w)} ${pct(w)}`)

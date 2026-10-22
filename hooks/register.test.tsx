@@ -106,7 +106,20 @@ test('a plan with only a weekly window, in the primary slot, is labelled by its 
   const { seen } = world(on, { up: true, answer })
   await $.session.start(START)
   // No context reading yet: the line leaves it out
-  expect(seen.statuses.at(-1)).toBe('⇄ Codex gpt-6-sol · 週 14%')
+  expect(seen.statuses.at(-1)).toBe('⇄ Codex gpt-6-sol · high · 週 14%')
+})
+
+test('on Claude the status line adds the model and effort Codex last answered its agents with, once there are any', async ($, on) => {
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  let codex: Health['session']['codex'] = null
+  const answer = () => health({ session: { sid: 's1', route: 'claude', pinned: true, codex } })
+  const { seen, clock } = world(on, { up: true, answer })
+  await $.session.start(START)
+  expect(seen.statuses.at(-1)).toBe('⇄ Claude')
+
+  codex = { model: 'gpt-5.6-terra', requestedModel: 'gpt-5.6-terra', resolvedModel: 'gpt-5.6-terra', effort: 'xhigh', requests: 4, failures: 0, inputTokens: 1, outputTokens: 1, lastStatus: 'completed' }
+  await clock.advance(10000)
+  expect(seen.statuses.at(-1)).toBe('⇄ Claude · Codex agent gpt-5.6-terra · xhigh')
 })
 
 test('with the relay down and not starting, the session keeps its address and says so', async ($, on) => {
