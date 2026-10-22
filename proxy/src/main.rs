@@ -38,6 +38,11 @@ enum Commands {
         #[arg(long = "no-monitor", action = ArgAction::SetTrue)]
         no_monitor: bool,
     },
+    /// Stop the running proxy; requests in flight get 10 seconds to finish
+    Stop {
+        #[arg(long)]
+        port: Option<u16>,
+    },
     /// Attach a read-only dashboard to a running proxy
     Monitor {
         #[arg(long)]
@@ -176,6 +181,7 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Commands::Stop { port } => stop_proxy(port.unwrap_or_else(config::port)),
         Commands::Demo => {
             let registry = Registry::with_default_alias();
             tui::run_mock_monitor(config::port(), &registry)
@@ -238,6 +244,73 @@ fn main() -> Result<()> {
             }
         },
     }
+}
+
+// Asks the proxy on `port` to exit, then waits for its process to end: Windows cannot replace a running exe, so
+// `cargo install` needs the process gone, not only its port closed.
+fn stop_proxy(port: u16) -> Result<()> {
+    let client = reqwest::blocking::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()?;
+    let response = match client
+        .post(format!("http://127.0.0.1:{port}/shutdown"))
+        .send()
+    {
+        Ok(response) => response,
+        Err(err) if err.is_connect() => {
+            println!("No proxy is running on 127.0.0.1:{port}");
+            return Ok(());
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        eprintln!(
+            "The program on 127.0.0.1:{port} has no /shutdown: a proxy older than `stop`, or not a proxy. Stop its process yourself."
+        );
+        std::process::exit(2);
+    }
+    let body: serde_json::Value = response.json().unwrap_or_default();
+    let pid = body["pid"].as_u64();
+    let (true, Some(pid)) = (status.is_success(), pid) else {
+        eprintln!("The proxy on 127.0.0.1:{port} did not stop ({status}): {body}");
+        std::process::exit(1);
+    };
+    println!(
+        "Proxy (pid {pid}) is stopping; requests in flight get {}s to finish",
+        server::SHUTDOWN_GRACE.as_secs()
+    );
+    let deadline =
+        std::time::Instant::now() + server::SHUTDOWN_GRACE + std::time::Duration::from_secs(5);
+    while process_is_running(pid) {
+        if std::time::Instant::now() > deadline {
+            eprintln!("Proxy (pid {pid}) is still running");
+            std::process::exit(1);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    println!("Proxy stopped (pid {pid})");
+    Ok(())
+}
+
+// The system's own tools answer, so the proxy needs no process API of its own
+#[cfg(windows)]
+fn process_is_running(pid: u64) -> bool {
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\"")))
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn process_is_running(pid: u64) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 async fn run_service(config: ServerConfig) -> Result<()> {

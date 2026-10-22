@@ -182,14 +182,43 @@ pub async fn serve_listener(
             ),
         ])),
     );
-    let app = app_with_monitor(Arc::new(Registry::with_default_alias()), monitor);
-    axum::serve(
+    let (stop, stop_requested) = tokio::sync::watch::channel(false);
+    let app = app_with_monitor(Arc::new(Registry::with_default_alias()), monitor)
+        .layer(axum::Extension(ShutdownRequest(stop)));
+    let graceful_stop = stop_requested.clone();
+    let server = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown)
-    .await?;
+    .with_graceful_shutdown(async move {
+        tokio::select! {
+            () = shutdown => {}
+            () = wait_for_stop(graceful_stop) => {}
+        }
+    });
+    // A stop over HTTP lets the requests in flight finish for SHUTDOWN_GRACE, then cuts them
+    let grace = async move {
+        wait_for_stop(stop_requested).await;
+        tokio::time::sleep(SHUTDOWN_GRACE).await;
+    };
+    tokio::select! {
+        result = std::future::IntoFuture::into_future(server) => result?,
+        () = grace => create_logger("server").warn("requests still in flight were cut at shutdown", None),
+    }
     Ok(())
+}
+
+pub const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Set by POST /shutdown; the server stops once it is.
+#[derive(Clone)]
+pub struct ShutdownRequest(pub tokio::sync::watch::Sender<bool>);
+
+async fn wait_for_stop(mut stop: tokio::sync::watch::Receiver<bool>) {
+    // The sender lives as long as the router does; a dropped one is no stop
+    if stop.wait_for(|stop| *stop).await.is_err() {
+        std::future::pending::<()>().await;
+    }
 }
 
 pub fn app(registry: Arc<Registry>) -> Router {
@@ -278,6 +307,7 @@ pub fn app_with_features(
     let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/monitor", get(handler_monitor))
+        .route("/shutdown", post(handler_shutdown))
         .route("/v1/messages", post(handler_messages))
         .route("/v1/messages/count_tokens", post(handler_count_tokens))
         .route("/v1/models", get(handler_models));
@@ -318,6 +348,47 @@ struct AppState {
     chat_completions: Option<Arc<ChatCompletionsBackend>>,
     images: Option<Arc<CodexImagesBackend>>,
     transcriptions: Option<Arc<CodexTranscriptionBackend>>,
+}
+
+// `claude-code-proxy stop` asks the proxy to exit. Only a local program may: a browser page's request carries
+// Origin or Sec-Fetch-Site, so a page the person opens cannot stop it.
+async fn handler_shutdown(
+    peer: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
+    stop: Option<axum::Extension<ShutdownRequest>>,
+    headers: http::HeaderMap,
+) -> Response {
+    let local = matches!(
+        &peer,
+        Some(axum::Extension(axum::extract::ConnectInfo(peer))) if peer.ip().to_canonical().is_loopback()
+    );
+    if !local
+        || headers.contains_key(http::header::ORIGIN)
+        || headers.contains_key("sec-fetch-site")
+    {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "permission_error",
+            "Shutdown requires a local program, not a browser page",
+        );
+    }
+    let Some(axum::Extension(ShutdownRequest(stop))) = stop else {
+        return json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "api_error",
+            "This server cannot be stopped over HTTP",
+        );
+    };
+    stop.send_replace(true);
+    create_logger("server").info("shutdown requested over HTTP", None);
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({
+            "ok": true,
+            "pid": std::process::id(),
+            "graceSeconds": SHUTDOWN_GRACE.as_secs(),
+        })),
+    )
+        .into_response()
 }
 
 async fn handler_monitor(

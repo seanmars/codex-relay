@@ -74,6 +74,7 @@ fn help_describes_visible_commands_and_hides_demo() -> Result<(), Box<dyn std::e
         "Start the proxy server and monitor",
         "List supported provider models",
         "Manage Codex authentication",
+        "Stop the running proxy",
     ] {
         assert!(stdout.contains(description), "missing: {description}");
     }
@@ -104,6 +105,77 @@ fn removed_provider_commands_exit_two() -> Result<(), Box<dyn std::error::Error>
             .failure()
             .code(2);
     }
+    Ok(())
+}
+
+#[test]
+fn stop_without_a_proxy_says_none_runs() -> Result<(), Box<dyn std::error::Error>> {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")?
+        .local_addr()?
+        .port();
+    Command::cargo_bin("claude-code-proxy")?
+        .args(["stop", "--port", &port.to_string()])
+        .assert()
+        .success()
+        .stdout(contains("No proxy is running"));
+    Ok(())
+}
+
+#[test]
+fn stop_ends_a_running_proxy_that_refused_a_browser_page() -> Result<(), Box<dyn std::error::Error>>
+{
+    use std::io::{Read, Write};
+    use std::time::{Duration, Instant};
+
+    struct Running(std::process::Child);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let config = tempfile::TempDir::new()?;
+    let port = std::net::TcpListener::bind("127.0.0.1:0")?
+        .local_addr()?
+        .port();
+    let mut proxy = Running(
+        std::process::Command::new(env!("CARGO_BIN_EXE_claude-code-proxy"))
+            .args(["serve", "--no-monitor", "--port", &port.to_string()])
+            .env("CCP_CONFIG_DIR", config.path())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?,
+    );
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(Instant::now() < deadline, "the proxy did not start");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let mut page = std::net::TcpStream::connect(("127.0.0.1", port))?;
+    write!(
+        page,
+        "POST /shutdown HTTP/1.1
+Host: 127.0.0.1
+Origin: http://example.com
+Content-Length: 0
+Connection: close
+
+"
+    )?;
+    let mut answer = String::new();
+    page.read_to_string(&mut answer)?;
+    assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
+    assert!(proxy.0.try_wait()?.is_none());
+
+    Command::cargo_bin("claude-code-proxy")?
+        .args(["stop", "--port", &port.to_string()])
+        .assert()
+        .success()
+        .stdout(contains("Proxy stopped"));
+    assert!(proxy.0.try_wait()?.is_some_and(|status| status.success()));
     Ok(())
 }
 
